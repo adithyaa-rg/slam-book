@@ -3,29 +3,55 @@ import { useState, useRef, useEffect, useCallback } from "react";
 // ─────────────────────────────────────────────────────────────────────────────
 // ██████████████████████   EASY SETUP CONFIG   ████████████████████████████████
 // ─────────────────────────────────────────────────────────────────────────────
-
+//
+// HOW TO SET UP JSONBIN (takes 2 minutes):
+//   1. Go to https://jsonbin.io and sign up (free)
+//   2. Click "+ Create Bin" → paste in [] (empty array) → Save
+//   3. Copy the Bin ID from the URL bar (looks like: 6642f1e1acd3cb34a83e1234)
+//   4. Go to API Keys tab → create a key → copy it
+//   5. Paste both below ↓
+//
 const CONFIG = {
   ownerName: "RG Adithyaa",
   tagline: "A personal archive of notes, memories, and future letters.",
   defaultCapsuleUnlockDate: "2027-01-01",
-  email: {
-    enabled: false,
-    serviceId: "service_1o9l95x",
-    templateId: "template_scp855x",
-    publicKey: "cQdNm5FLtsyrIlcOx",
-    recipientEmail: "adithyaa2003@gmail.com",
+
+  jsonbin: {
+    binId: "6a08436e250b1311c35b234d",   // e.g. "6642f1e1acd3cb34a83e1234"
+    apiKey: "$2a$10$pFOsONWycbhQ7wzLwhj6deXuhAGGfqXL9k09bOaUplSAhxAj4NeR2",  // e.g. "$2a$10$abcdef..."
   },
-  googleDrive: {
-    enabled: true,
-    clientId: "577415369913-5vpsor6i2gpfe5oaq86i1n8h9iogmrq8.apps.googleusercontent.com",
-    // Each entry is saved as slam-book-entry-{id}.json in this folder name
-    folderName: "SlamBook Memories",
-  },
-  checkCapsulesOnLoad: true,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ██████████████████████   APP CODE BELOW   ███████████████████████████████████
+// ██████████████████████   JSONBIN HELPERS   ██████████████████████████████████
+// ─────────────────────────────────────────────────────────────────────────────
+
+const JSONBIN_BASE = "https://api.jsonbin.io/v3";
+
+async function loadEntriesFromBin() {
+  const res = await fetch(`${JSONBIN_BASE}/b/${CONFIG.jsonbin.binId}/latest`, {
+    headers: { "X-Master-Key": CONFIG.jsonbin.apiKey },
+  });
+  if (!res.ok) throw new Error(`JSONBin load failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data.record) ? data.record : [];
+}
+
+async function saveEntriesToBin(entries) {
+  const res = await fetch(`${JSONBIN_BASE}/b/${CONFIG.jsonbin.binId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": CONFIG.jsonbin.apiKey,
+    },
+    body: JSON.stringify(entries),
+  });
+  if (!res.ok) throw new Error(`JSONBin save failed: ${res.status}`);
+  return res.json();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ██████████████████████   APP CODE   █████████████████████████████████████████
 // ─────────────────────────────────────────────────────────────────────────────
 
 const NAVY = "#1B2A41";
@@ -37,8 +63,6 @@ const SAGE = "#A3B18A";
 const PALETTE = [PINK, SAGE, CREAM, "#EDE0D4", "#D4E6F1", "#E8D5C4"];
 const EMOJIS = ["💌", "🌸", "✨", "🎵", "🌿", "🧡", "💛", "🦋", "📝", "🌙", "🎨", "🌻"];
 
-const SEED = [];
-
 function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function fmtDate(s) {
   return new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
@@ -46,131 +70,10 @@ function fmtDate(s) {
 function isLocked(unlockDate) {
   return unlockDate && new Date(unlockDate) > new Date();
 }
-
-// ─── Google Drive helpers ─────────────────────────────────────────────────────
-
-// Gets or creates the SlamBook folder, returns its ID
-async function getOrCreateFolder(accessToken, folderName) {
-  // Search for existing folder
-  const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name)`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const searchData = await searchRes.json();
-  if (searchData.files && searchData.files.length > 0) {
-    return searchData.files[0].id;
-  }
-  // Create the folder
-  const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ name: folderName, mimeType: "application/vnd.google-apps.folder" }),
-  });
-  const folderData = await createRes.json();
-  return folderData.id;
-}
-
-// Save a single entry as its own JSON file
-async function saveEntryToDrive(entry, accessToken) {
-  const folderId = await getOrCreateFolder(accessToken, CONFIG.googleDrive.folderName);
-  const fileName = `slam-book-entry-${entry.id}.json`;
-
-  // Check if file already exists (for updates)
-  const searchRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=name='${fileName}' and '${folderId}' in parents and trashed=false&fields=files(id)`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const searchData = await searchRes.json();
-
-  const blob = new Blob([JSON.stringify(entry, null, 2)], { type: "application/json" });
-
-  if (searchData.files && searchData.files.length > 0) {
-    // Update existing file
-    const fileId = searchData.files[0].id;
-    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: blob,
-    });
-  } else {
-    // Create new file in folder
-    const meta = JSON.stringify({ name: fileName, parents: [folderId] });
-    const form = new FormData();
-    form.append("metadata", new Blob([meta], { type: "application/json" }));
-    form.append("file", blob);
-    await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
-      body: form,
-    });
-  }
-}
-
-// Load all entries from the SlamBook folder on Drive
-async function loadEntriesFromDrive(accessToken) {
-  const folderId = await getOrCreateFolder(accessToken, CONFIG.googleDrive.folderName);
-  const listRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed=false and name contains 'slam-book-entry-'&fields=files(id,name)&orderBy=createdTime desc`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const listData = await listRes.json();
-  if (!listData.files || listData.files.length === 0) return [];
-
-  const entries = await Promise.all(
-    listData.files.map(async (f) => {
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      return res.json();
-    })
-  );
-  return entries;
-}
-
-// Request OAuth token and run callback with it
-function withDriveToken(callback) {
-  const { google } = window;
-  if (!google) {
-    alert("Google Identity Services not loaded. Check your internet connection.");
-    return;
-  }
-  const tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CONFIG.googleDrive.clientId,
-    scope: "https://www.googleapis.com/auth/drive.file",
-    callback: async (resp) => {
-      if (resp.error) {
-        console.error("OAuth error:", resp.error);
-        return;
-      }
-      await callback(resp.access_token);
-    },
-  });
-  tokenClient.requestAccessToken();
-}
-
-// ─── EmailJS capsule notification helper ─────────────────────────────────────
-async function sendCapsuleEmail(entry) {
-  if (!CONFIG.email.enabled) return;
-  const { emailjs } = window;
-  if (!emailjs) return;
-  await emailjs.send(
-    CONFIG.email.serviceId,
-    CONFIG.email.templateId,
-    {
-      to_email: CONFIG.email.recipientEmail,
-      from_name: entry.name,
-      memory: entry.memory,
-      message: entry.message,
-      unlock_date: fmtDate(entry.unlockDate),
-      owner_name: CONFIG.ownerName,
-    },
-    CONFIG.email.publicKey
+function isConfigured() {
+  return (
+    CONFIG.jsonbin.binId !== "PASTE_YOUR_BIN_ID_HERE" &&
+    CONFIG.jsonbin.apiKey !== "PASTE_YOUR_API_KEY_HERE"
   );
 }
 
@@ -210,6 +113,7 @@ body { overflow-x: hidden; }
 }
 .btn-cta:hover  { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(201,76,76,.4); }
 .btn-cta:active { transform: translateY(0); }
+.btn-cta:disabled { opacity: .6; cursor: not-allowed; transform: none; }
 
 .btn-ghost {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -219,14 +123,7 @@ body { overflow-x: hidden; }
   transition: background .15s, border-color .15s;
 }
 .btn-ghost:hover { background: ${NAVY}0d; border-color: ${NAVY}88; }
-
-.btn-icon {
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; border: none; cursor: pointer;
-  color: ${NAVY}88; border-radius: 8px; padding: 6px; min-height: 36px; min-width: 36px;
-  transition: background .15s, color .15s;
-}
-.btn-icon:hover { background: ${NAVY}0d; color: ${NAVY}; }
+.btn-ghost:disabled { opacity: .6; cursor: not-allowed; }
 
 .hand-input {
   width: 100%; border: none; border-bottom: 2px solid ${NAVY}22;
@@ -318,6 +215,13 @@ body { overflow-x: hidden; }
 }
 .field-error { color: ${RED}; font-family: 'Patrick Hand', cursive; font-size: 14px; margin-top: 6px; }
 
+.config-warn {
+  background: #FEF3C7; border: 2px solid #F59E0B; border-radius: 14px;
+  padding: 20px 24px; margin: 0 auto 32px; max-width: 680px;
+  font-family: 'Patrick Hand', cursive; font-size: 16px; color: #92400E; line-height: 1.7;
+}
+.config-warn strong { display: block; font-size: 18px; margin-bottom: 6px; }
+
 @media (max-width: 680px) {
   .nav-label { display: none; }
   .nav-pill   { font-size: 22px; padding: 8px; }
@@ -347,7 +251,7 @@ function Lightbox({ src, onClose }) {
   return (
     <div className="lightbox-overlay" onClick={onClose} role="dialog" aria-modal="true">
       <button className="lightbox-close" onClick={onClose} aria-label="Close">×</button>
-      <img src={src} alt="Memory photo" onClick={(e) => e.stopPropagation()} />
+      <img src={src} alt="Memory" onClick={(e) => e.stopPropagation()} />
     </div>
   );
 }
@@ -356,14 +260,14 @@ function Lightbox({ src, onClose }) {
 function MediaGrid({ previews }) {
   const [lightbox, setLightbox] = useState(null);
   if (!previews || previews.length === 0) return null;
-  const imgPreviews = previews.filter((p) => p.type === "image");
-  const otherFiles = previews.filter((p) => p.type !== "image");
-  const cols = imgPreviews.length === 1 ? "cols-1" : imgPreviews.length === 2 ? "cols-2" : "cols-3";
+  const imgs = previews.filter((p) => p.type === "image" && p.url);
+  const other = previews.filter((p) => p.type !== "image");
+  const cols = imgs.length === 1 ? "cols-1" : imgs.length === 2 ? "cols-2" : "cols-3";
   return (
     <>
-      {imgPreviews.length > 0 && (
+      {imgs.length > 0 && (
         <div className={`media-grid ${cols}`}>
-          {imgPreviews.map((p, i) => (
+          {imgs.map((p, i) => (
             <img key={i} src={p.url} alt={p.name} className="media-img"
               onClick={() => setLightbox(p.url)}
               onKeyDown={(e) => e.key === "Enter" && setLightbox(p.url)}
@@ -371,13 +275,25 @@ function MediaGrid({ previews }) {
           ))}
         </div>
       )}
-      {otherFiles.map((p, i) => (
+      {other.map((p, i) => (
         <div key={i} style={{ background: "rgba(255,255,255,.5)", borderRadius: 999, padding: "4px 10px", marginTop: 6, fontSize: 13 }}>
           📎 {p.name}
         </div>
       ))}
       {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
     </>
+  );
+}
+
+// ─── Config warning ───────────────────────────────────────────────────────────
+function ConfigWarn() {
+  if (isConfigured()) return null;
+  return (
+    <div className="config-warn">
+      <strong>⚠️ JSONBin not configured yet</strong>
+      Open <code>SlamBook.jsx</code> and fill in your <code>binId</code> and <code>apiKey</code> in the CONFIG block at the top.
+      Sign up free at <strong>jsonbin.io</strong> — takes 2 minutes!
+    </div>
   );
 }
 
@@ -437,6 +353,7 @@ function HomePage({ setPage, entries }) {
         </div>
       ))}
       <main id="main-content" style={{ maxWidth: 900, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
+        <ConfigWarn />
         <p style={{ fontFamily: "'Patrick Hand',cursive", letterSpacing: 3, color: RED, marginBottom: 16, fontSize: 13 }}>
           PERSONAL MEMORY VAULT
         </p>
@@ -461,10 +378,6 @@ function HomePage({ setPage, entries }) {
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────
-// ⚠️  FIX: All field sub-components are defined OUTSIDE WritePage so React
-//    doesn't treat them as new component types on every render, which was
-//    causing inputs to lose focus after every keystroke.
-
 function FieldWrapper({ label, id, err, children }) {
   return (
     <div className="field-group" role="group" aria-labelledby={`lbl-${id}`}>
@@ -499,6 +412,7 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
 
   const submit = async () => {
     if (!memory.trim()) { setErrors({ memory: "Please share at least a short memory." }); return; }
+    if (!isConfigured()) { showToast("⚠️ Please configure JSONBin first!"); return; }
     setErrors({});
     setSaving(true);
 
@@ -511,39 +425,27 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
       memory,
       message,
       note,
-      // Strip blob URLs before saving to Drive (they don't survive page reload)
-      mediaPreviews: mediaPreviews.map(p => ({ name: p.name, type: p.type, url: p.type === "image" ? p.url : null })),
+      // Blob URLs are local-only and won't survive reload — filenames are saved for reference
+      mediaPreviews: mediaPreviews.map(p => ({ name: p.name, type: p.type, url: null })),
       emoji: rnd(EMOJIS),
       color: rnd(PALETTE),
       rot: Math.random() * 6 - 3,
       date: new Date().toISOString(),
     };
 
-    // Save to Google Drive as individual file
-    if (CONFIG.googleDrive.enabled) {
-      try {
-        await new Promise((resolve, reject) => {
-          withDriveToken(async (token) => {
-            try {
-              await saveEntryToDrive(entry, token);
-              resolve();
-            } catch (err) {
-              reject(err);
-            }
-          });
-        });
-        showToast("Memory saved to Drive ✨");
-      } catch (err) {
-        console.error("Drive save failed:", err);
-        showToast("Saved locally (Drive sync failed)");
-      }
-    } else {
+    try {
+      const current = await loadEntriesFromBin();
+      const updated = [entry, ...current];
+      await saveEntriesToBin(updated);
+      setEntries(updated);
       showToast("Memory saved ✨");
+      setPage(type === "wall" ? "gallery" : "open-later");
+    } catch (err) {
+      console.error("JSONBin save failed:", err);
+      showToast("❌ Save failed — check your JSONBin config.");
+    } finally {
+      setSaving(false);
     }
-
-    setEntries(prev => [entry, ...prev]);
-    setSaving(false);
-    setPage(type === "wall" ? "gallery" : "open-later");
   };
 
   return (
@@ -554,7 +456,6 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
           Leave a memory, note, confession, or future message for {CONFIG.ownerName}.
         </p>
 
-        {/* Anonymous toggle */}
         <div style={{ marginBottom: 24 }}>
           <label style={{ display: "flex", gap: 12, alignItems: "center", fontFamily: "'Patrick Hand',cursive", fontSize: 17, cursor: "pointer" }}>
             <input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}
@@ -605,13 +506,12 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
             value={note} onChange={e => setNote(e.target.value)} />
         </FieldWrapper>
 
-        {/* Upload */}
         <div className="upload-zone" style={{ marginBottom: 28 }}
           onClick={() => fileRef.current.click()}
           onKeyDown={e => e.key === "Enter" && fileRef.current.click()}
-          tabIndex={0} role="button" aria-label="Upload photos or files">
+          tabIndex={0} role="button" aria-label="Upload files">
           <p style={{ fontFamily: "'Patrick Hand',cursive", fontSize: 18, color: NAVY + "bb" }}>
-            📎 Add photos, videos, audio, files
+            📎 Attach files (filenames saved to memory)
           </p>
           <p style={{ fontFamily: "'Patrick Hand',cursive", fontSize: 13, color: NAVY + "66", marginTop: 6 }}>
             Click or press Enter to browse
@@ -621,8 +521,8 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
         </div>
 
         {mediaPreviews.length > 0 && (
-          <div style={{ marginBottom: 28 }}>
-            <MediaGrid previews={mediaPreviews} />
+          <div style={{ marginBottom: 16, fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", fontSize: 14 }}>
+            {mediaPreviews.map((p, i) => <div key={i}>📎 {p.name}</div>)}
           </div>
         )}
 
@@ -646,7 +546,6 @@ function MemoryCard({ e }) {
             {e.type === "capsule" ? "🔒 capsule" : "📸 wall"}
           </span>
         </div>
-        <MediaGrid previews={e.mediaPreviews} />
         <div style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }} aria-hidden="true">{e.emoji}</div>
         <p style={{ fontFamily: "'Caveat',cursive", fontSize: 22, lineHeight: 1.55, color: NAVY, marginBottom: 10 }}>
           "{e.memory}"
@@ -661,6 +560,11 @@ function MemoryCard({ e }) {
             {e.note}
           </p>
         )}
+        {e.mediaPreviews?.length > 0 && (
+          <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "66", fontSize: 13, marginBottom: 8 }}>
+            📎 {e.mediaPreviews.map(p => p.name).join(", ")}
+          </p>
+        )}
         <p style={{ textAlign: "right", marginTop: 10, fontSize: 12, color: NAVY + "55", fontFamily: "'Patrick Hand',cursive" }}>
           <time dateTime={e.date}>{fmtDate(e.date)}</time>
         </p>
@@ -671,41 +575,30 @@ function MemoryCard({ e }) {
 
 function GalleryPage({ entries, setEntries, showToast }) {
   const [filter, setFilter] = useState("all");
-  const [loadingDrive, setLoadingDrive] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // Load all entries from Drive on mount (reads individual files)
-  const loadFromDrive = useCallback(() => {
-    if (!CONFIG.googleDrive.enabled) return;
-    setLoadingDrive(true);
-    withDriveToken(async (token) => {
-      try {
-        const driveEntries = await loadEntriesFromDrive(token);
-        if (driveEntries.length > 0) {
-          // Merge: Drive is source of truth, deduplicate by id
-          setEntries(prev => {
-            const map = new Map();
-            [...driveEntries, ...prev].forEach(e => map.set(e.id, e));
-            return Array.from(map.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
-          });
-          showToast(`Loaded ${driveEntries.length} memories from Drive ☁️`);
-        } else {
-          showToast("No memories found on Drive yet.");
-        }
-      } catch (err) {
-        console.error("Load from Drive failed:", err);
-        showToast("Couldn't load from Drive.");
-      } finally {
-        setLoadingDrive(false);
-      }
-    });
+  const syncFromBin = useCallback(async () => {
+    if (!isConfigured()) { showToast("⚠️ Configure JSONBin first!"); return; }
+    setLoading(true);
+    try {
+      const loaded = await loadEntriesFromBin();
+      setEntries(loaded);
+      showToast(`Loaded ${loaded.length} memories ☁️`);
+    } catch (err) {
+      console.error(err);
+      showToast("❌ Couldn't load from JSONBin.");
+    } finally {
+      setLoading(false);
+    }
   }, [setEntries, showToast]);
+
+  useEffect(() => { syncFromBin(); }, []);
 
   const shown = entries.filter(e => {
     if (filter === "all") return true;
     if (filter === "wall") return e.type === "wall";
     if (filter === "capsule") return e.type === "capsule";
     if (filter === "anon") return e.visibility === "anonymous";
-    if (filter === "photos") return e.mediaPreviews?.some(p => p.type === "image");
     return true;
   });
 
@@ -714,20 +607,15 @@ function GalleryPage({ entries, setEntries, showToast }) {
       <main id="main-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}>
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 56, color: NAVY }}>memory wall 📸</h1>
-
-          {/* Drive sync button */}
-          {CONFIG.googleDrive.enabled && (
-            <div style={{ marginTop: 14 }}>
-              <button className="btn-ghost" onClick={loadFromDrive} disabled={loadingDrive}
-                style={{ fontSize: 16, padding: "10px 22px" }}>
-                {loadingDrive ? "Loading from Drive… ⏳" : "☁️ Sync from Google Drive"}
-              </button>
-            </div>
-          )}
-
+          <div style={{ marginTop: 14 }}>
+            <button className="btn-ghost" onClick={syncFromBin} disabled={loading}
+              style={{ fontSize: 16, padding: "10px 22px" }}>
+              {loading ? "Loading… ⏳" : "☁️ Refresh memories"}
+            </button>
+          </div>
           <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 20 }}
             role="group" aria-label="Filter memories">
-            {[["all", "all"], ["wall", "public wall"], ["capsule", "time capsule"], ["anon", "anonymous"], ["photos", "📸 with photos"]].map(([f, lbl]) => (
+            {[["all", "all"], ["wall", "public wall"], ["capsule", "time capsule"], ["anon", "anonymous"]].map(([f, lbl]) => (
               <button key={f} className={`filter-pill${filter === f ? " active" : ""}`}
                 onClick={() => setFilter(f)} aria-pressed={filter === f}>
                 {lbl}
@@ -736,7 +624,11 @@ function GalleryPage({ entries, setEntries, showToast }) {
           </div>
         </div>
 
-        {shown.length === 0 ? (
+        {loading ? (
+          <p style={{ textAlign: "center", fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginTop: 60, fontSize: 20 }}>
+            Loading memories… ✨
+          </p>
+        ) : shown.length === 0 ? (
           <p style={{ textAlign: "center", fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginTop: 60, fontSize: 20 }}>
             No memories here yet.
           </p>
@@ -761,6 +653,9 @@ function TimelinePage({ entries }) {
         </h1>
         <ol style={{ listStyle: "none", position: "relative", paddingLeft: 32 }}>
           <div style={{ position: "absolute", left: 14, top: 0, bottom: 0, width: 2, background: NAVY + "18", borderRadius: 2 }} aria-hidden="true" />
+          {sorted.length === 0 && (
+            <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", fontSize: 18 }}>No memories yet.</p>
+          )}
           {sorted.map((e) => (
             <li key={e.id} style={{ position: "relative", marginBottom: 28 }}>
               <div style={{
@@ -778,7 +673,6 @@ function TimelinePage({ entries }) {
                   <time dateTime={e.date} style={{ fontSize: 13, color: RED, fontFamily: "'Patrick Hand',cursive" }}>{fmtDate(e.date)}</time>
                 </div>
                 <p style={{ fontFamily: "'Caveat',cursive", fontSize: 23, lineHeight: 1.6, color: NAVY }}>{e.memory}</p>
-                <MediaGrid previews={e.mediaPreviews} />
               </article>
             </li>
           ))}
@@ -819,14 +713,13 @@ function CapsuleCard({ e, locked }) {
           {e.message && (
             <p style={{ color: CREAM + "cc", lineHeight: 1.7, fontFamily: "'Patrick Hand',cursive" }}>{e.message}</p>
           )}
-          <MediaGrid previews={e.mediaPreviews} />
         </>
       )}
     </article>
   );
 }
 
-function OpenLaterPage({ entries, showToast }) {
+function OpenLaterPage({ entries }) {
   const capsules = entries.filter(e => e.type === "capsule");
   const locked = capsules.filter(e => isLocked(e.unlockDate));
   const unlocked = capsules.filter(e => !isLocked(e.unlockDate));
@@ -868,7 +761,7 @@ function SettingsPage({ entries, showToast }) {
     a.href = URL.createObjectURL(blob);
     a.download = "slam-book-export.json";
     a.click();
-    showToast("📥 Exported to JSON!");
+    showToast("📥 Exported!");
   };
 
   const Row = ({ label, value, status }) => (
@@ -885,27 +778,25 @@ function SettingsPage({ entries, showToast }) {
       <main id="main-content" style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}>
         <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 52, color: NAVY, marginBottom: 8 }}>settings ⚙️</h1>
         <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginBottom: 36 }}>
-          Edit the <code>CONFIG</code> block at the top of the file to change these settings.
+          Edit the <code>CONFIG</code> block at the top of <code>SlamBook.jsx</code> to change these.
         </p>
         <section style={{ background: "white", borderRadius: 18, padding: "24px 28px", boxShadow: "0 3px 16px rgba(0,0,0,.07)", marginBottom: 28 }}>
           <h2 style={{ fontFamily: "'Caveat',cursive", fontSize: 28, color: NAVY, marginBottom: 4 }}>Status</h2>
           <Row label="Owner name" value={CONFIG.ownerName} status={true} />
-          <Row label="Email reminders" value={CONFIG.email.enabled ? CONFIG.email.recipientEmail : "Not configured"} status={CONFIG.email.enabled} />
-          <Row label="Google Drive" value={CONFIG.googleDrive.enabled ? "Connected" : "Not configured"} status={CONFIG.googleDrive.enabled} />
-          <Row label="Drive folder" value={CONFIG.googleDrive.folderName} status={CONFIG.googleDrive.enabled} />
+          <Row label="JSONBin" value={isConfigured() ? "Connected ✓" : "Not configured"} status={isConfigured()} />
+          <Row label="Memories stored" value={`${entries.length} entries`} status={true} />
         </section>
         <section style={{ background: "white", borderRadius: 18, padding: "24px 28px", boxShadow: "0 3px 16px rgba(0,0,0,.07)", marginBottom: 28 }}>
           <h2 style={{ fontFamily: "'Caveat',cursive", fontSize: 28, color: NAVY, marginBottom: 16 }}>Actions</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <button className="btn-ghost" onClick={handleExportJSON} style={{ justifyContent: "flex-start", gap: 12 }}>
-              📥 Export all memories as JSON
-            </button>
-          </div>
+          <button className="btn-ghost" onClick={handleExportJSON} style={{ justifyContent: "flex-start", gap: 12 }}>
+            📥 Export all memories as JSON
+          </button>
         </section>
         <div style={{ background: "#EEF9F4", border: "1px solid #A7F3D0", borderRadius: 14, padding: "18px 22px" }}>
           <p style={{ fontFamily: "'Patrick Hand',cursive", color: "#065F46", fontSize: 15, lineHeight: 1.7 }}>
-            ☁️ <strong>Google Drive:</strong> Each memory is saved as its own file (<code>slam-book-entry-{'<id>'}.json</code>) inside a <strong>{CONFIG.googleDrive.folderName}</strong> folder.
-            On the Memory Wall, click "Sync from Google Drive" to load all entries from that folder.
+            ☁️ <strong>JSONBin.io</strong> stores all memories as a single JSON array in the cloud.
+            Free tier: <strong>10,000 requests/month</strong>. Your <code>apiKey</code> is in the CONFIG —
+            keep it private and don't share your code publicly with it included.
           </p>
         </div>
       </main>
@@ -916,19 +807,10 @@ function SettingsPage({ entries, showToast }) {
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function SlamBook() {
   const [page, setPage] = useState("home");
-  const [entries, setEntries] = useState(SEED);
+  const [entries, setEntries] = useState([]);
   const [toast, setToast] = useState(null);
 
   const showToast = useCallback((msg) => setToast(msg), []);
-
-  useEffect(() => {
-    if (!CONFIG.checkCapsulesOnLoad || !CONFIG.email.enabled) return;
-    entries.forEach(e => {
-      if (e.type === "capsule" && !isLocked(e.unlockDate) && !e._emailSent) {
-        sendCapsuleEmail(e);
-      }
-    });
-  }, []);
 
   return (
     <>
@@ -941,7 +823,7 @@ export default function SlamBook() {
         {page === "write" && <WritePage entries={entries} setEntries={setEntries} setPage={setPage} showToast={showToast} />}
         {page === "gallery" && <GalleryPage entries={entries} setEntries={setEntries} showToast={showToast} />}
         {page === "timeline" && <TimelinePage entries={entries} />}
-        {page === "open-later" && <OpenLaterPage entries={entries} showToast={showToast} />}
+        {page === "open-later" && <OpenLaterPage entries={entries} />}
         {page === "settings" && <SettingsPage entries={entries} showToast={showToast} />}
 
         {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
