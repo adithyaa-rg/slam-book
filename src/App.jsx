@@ -14,7 +14,6 @@ import { useState, useRef, useEffect, useCallback } from "react";
 const CONFIG = {
   ownerName: "RG Adithyaa",
   tagline: "A personal archive of notes, memories, and future letters.",
-  defaultCapsuleUnlockDate: "2027-01-01",
 
   jsonbin: {
     binId: "6a08436e250b1311c35b234d",   // e.g. "6642f1e1acd3cb34a83e1234"
@@ -66,9 +65,6 @@ const EMOJIS = ["💌", "🌸", "✨", "🎵", "🌿", "🧡", "💛", "🦋", "
 function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function fmtDate(s) {
   return new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-}
-function isLocked(unlockDate) {
-  return unlockDate && new Date(unlockDate) > new Date();
 }
 function isConfigured() {
   return (
@@ -194,8 +190,7 @@ body { overflow-x: hidden; }
   display: inline-flex; align-items: center; gap: 4px;
   font-family: 'Patrick Hand', cursive; font-size: 12px; padding: 3px 10px; border-radius: 999px;
 }
-.badge-capsule { background: ${NAVY}18; color: ${NAVY}; }
-.badge-wall    { background: ${SAGE}44; color: ${NAVY}; }
+.badge-wall { background: ${SAGE}44; color: ${NAVY}; }
 
 .toast {
   position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
@@ -303,7 +298,6 @@ const NAV_ITEMS = [
   ["write", "✏️", "write"],
   ["gallery", "📸", "wall"],
   ["timeline", "🕰", "timeline"],
-  ["open-later", "🔒", "capsule"],
 ];
 
 function Nav({ page, setPage }) {
@@ -369,7 +363,6 @@ function HomePage({ setPage, entries }) {
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: 48, flexWrap: "wrap" }} aria-label="Stats">
           <Stat icon="💌" value={entries.length} label="memories" />
-          <Stat icon="🔒" value={entries.filter(e => e.type === "capsule").length} label="time capsules" />
           <Stat icon="🌸" value={entries.filter(e => e.mediaPreviews?.some(p => p.type === "image")).length} label="photo memories" />
         </div>
       </main>
@@ -391,8 +384,6 @@ function FieldWrapper({ label, id, err, children }) {
 function WritePage({ entries, setEntries, setPage, showToast }) {
   const [name, setName] = useState("");
   const [anonymous, setAnonymous] = useState(false);
-  const [type, setType] = useState("wall");
-  const [unlockDate, setUnlockDate] = useState(CONFIG.defaultCapsuleUnlockDate);
   const [memory, setMemory] = useState("");
   const [message, setMessage] = useState("");
   const [note, setNote] = useState("");
@@ -420,8 +411,7 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
       id: Date.now(),
       name: anonymous ? "Anonymous" : name || "Someone",
       visibility: anonymous ? "anonymous" : "named",
-      type,
-      unlockDate,
+      type: "wall",
       memory,
       message,
       note,
@@ -439,7 +429,7 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
       await saveEntriesToBin(updated);
       setEntries(updated);
       showToast("Memory saved ✨");
-      setPage(type === "wall" ? "gallery" : "open-later");
+      setPage("gallery");
     } catch (err) {
       console.error("JSONBin save failed:", err);
       showToast("❌ Save failed — check your JSONBin config.");
@@ -453,7 +443,7 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
       <main id="main-content" style={{ maxWidth: 720, margin: "0 auto", padding: "40px 24px" }}>
         <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 58, color: NAVY, marginBottom: 8 }}>write something 💌</h1>
         <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginBottom: 36 }}>
-          Leave a memory, note, confession, or future message for {CONFIG.ownerName}.
+          Leave a memory, note, confession, or message for {CONFIG.ownerName}.
         </p>
 
         <div style={{ marginBottom: 24 }}>
@@ -468,25 +458,6 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
           <FieldWrapper label="Your name" id="name">
             <input className="hand-input" placeholder="e.g. Priya"
               value={name} onChange={e => setName(e.target.value)} aria-label="Your name" />
-          </FieldWrapper>
-        )}
-
-        <FieldWrapper label="Where should this go?" id="type">
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {[["wall", "📸 Public Wall"], ["capsule", "🔒 Time Capsule"]].map(([v, lbl]) => (
-              <button key={v} className={`filter-pill${type === v ? " active" : ""}`}
-                onClick={() => setType(v)} aria-pressed={type === v}>
-                {lbl}
-              </button>
-            ))}
-          </div>
-        </FieldWrapper>
-
-        {type === "capsule" && (
-          <FieldWrapper label="Open on this date" id="unlockDate">
-            <input type="date" value={unlockDate} className="hand-input"
-              onChange={e => setUnlockDate(e.target.value)}
-              min={new Date().toISOString().split("T")[0]} aria-label="Capsule unlock date" />
           </FieldWrapper>
         )}
 
@@ -542,9 +513,7 @@ function MemoryCard({ e }) {
         aria-label={`Memory from ${e.name}`}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <span style={{ fontFamily: "'Patrick Hand',cursive", fontSize: 14, fontWeight: 600, color: NAVY }}>{e.name}</span>
-          <span className={`badge ${e.type === "capsule" ? "badge-capsule" : "badge-wall"}`}>
-            {e.type === "capsule" ? "🔒 capsule" : "📸 wall"}
-          </span>
+          <span className="badge badge-wall">📸 wall</span>
         </div>
         <div style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }} aria-hidden="true">{e.emoji}</div>
         <p style={{ fontFamily: "'Caveat',cursive", fontSize: 22, lineHeight: 1.55, color: NAVY, marginBottom: 10 }}>
@@ -596,8 +565,6 @@ function GalleryPage({ entries, setEntries, showToast }) {
 
   const shown = entries.filter(e => {
     if (filter === "all") return true;
-    if (filter === "wall") return e.type === "wall";
-    if (filter === "capsule") return e.type === "capsule";
     if (filter === "anon") return e.visibility === "anonymous";
     return true;
   });
@@ -615,7 +582,7 @@ function GalleryPage({ entries, setEntries, showToast }) {
           </div>
           <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 20 }}
             role="group" aria-label="Filter memories">
-            {[["all", "all"], ["wall", "public wall"], ["capsule", "time capsule"], ["anon", "anonymous"]].map(([f, lbl]) => (
+            {[["all", "all"], ["anon", "anonymous"]].map(([f, lbl]) => (
               <button key={f} className={`filter-pill${filter === f ? " active" : ""}`}
                 onClick={() => setFilter(f)} aria-pressed={filter === f}>
                 {lbl}
@@ -661,12 +628,12 @@ function TimelinePage({ entries }) {
               <div style={{
                 position: "absolute", left: -26, top: 20,
                 width: 14, height: 14, borderRadius: "50%",
-                background: e.type === "capsule" ? NAVY : RED, border: `2px solid ${CREAM}`,
+                background: RED, border: `2px solid ${CREAM}`,
               }} aria-hidden="true" />
               <article style={{
                 background: "white", borderRadius: 18, padding: "20px 24px",
                 boxShadow: "0 3px 16px rgba(0,0,0,.07)",
-                borderLeft: `4px solid ${e.type === "capsule" ? NAVY : RED}`,
+                borderLeft: `4px solid ${RED}`,
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                   <span style={{ fontFamily: "'Patrick Hand',cursive", fontWeight: 600, color: NAVY }}>{e.name}</span>
@@ -677,77 +644,6 @@ function TimelinePage({ entries }) {
             </li>
           ))}
         </ol>
-      </main>
-    </div>
-  );
-}
-
-// ─── Time Capsule ─────────────────────────────────────────────────────────────
-function CapsuleCard({ e, locked }) {
-  const daysLeft = e.unlockDate
-    ? Math.ceil((new Date(e.unlockDate) - new Date()) / 86400000)
-    : null;
-  return (
-    <article style={{
-      background: "rgba(255,255,255,.07)", borderRadius: 20, padding: 28, marginBottom: 22,
-      border: `1px solid rgba(255,255,255,${locked ? ".06" : ".18"})`,
-    }} aria-label={`Capsule from ${e.name}${locked ? ", sealed" : ", unlocked"}`}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ color: CREAM, fontFamily: "'Patrick Hand',cursive", fontWeight: 600 }}>{e.name}</span>
-        <span style={{ color: locked ? "#F59E0B" : SAGE, fontSize: 13, fontFamily: "'Patrick Hand',cursive" }}>
-          {locked ? `🔒 unlocks ${fmtDate(e.unlockDate)} · ${daysLeft} days` : `✅ unlocked ${fmtDate(e.unlockDate)}`}
-        </span>
-      </div>
-      {locked ? (
-        <div style={{ textAlign: "center", padding: "20px 0" }}>
-          <div style={{ fontSize: 44 }} aria-hidden="true">🔒</div>
-          <p style={{ color: CREAM + "66", fontFamily: "'Patrick Hand',cursive", marginTop: 10 }}>
-            This message is sealed until {fmtDate(e.unlockDate)}.
-          </p>
-        </div>
-      ) : (
-        <>
-          <p style={{ fontFamily: "'Caveat',cursive", fontSize: 24, color: CREAM, lineHeight: 1.7, marginBottom: 12 }}>
-            {e.memory}
-          </p>
-          {e.message && (
-            <p style={{ color: CREAM + "cc", lineHeight: 1.7, fontFamily: "'Patrick Hand',cursive" }}>{e.message}</p>
-          )}
-        </>
-      )}
-    </article>
-  );
-}
-
-function OpenLaterPage({ entries }) {
-  const capsules = entries.filter(e => e.type === "capsule");
-  const locked = capsules.filter(e => isLocked(e.unlockDate));
-  const unlocked = capsules.filter(e => !isLocked(e.unlockDate));
-  return (
-    <div style={{ minHeight: "100vh", background: NAVY, paddingTop: 100 }}>
-      <main id="main-content" style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px" }}>
-        <div style={{ textAlign: "center", marginBottom: 50 }}>
-          <div style={{ fontSize: 60 }} aria-hidden="true">🔒</div>
-          <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 56, color: CREAM }}>time capsule</h1>
-          <p style={{ color: CREAM + "99", marginTop: 10, fontFamily: "'Patrick Hand',cursive" }}>Messages meant for the future.</p>
-        </div>
-        {unlocked.length > 0 && (
-          <section aria-label="Unlocked capsules" style={{ marginBottom: 40 }}>
-            <h2 style={{ fontFamily: "'Patrick Hand',cursive", color: SAGE, fontSize: 18, marginBottom: 16, letterSpacing: 1 }}>✅ UNLOCKED</h2>
-            {unlocked.map(e => <CapsuleCard key={e.id} e={e} locked={false} />)}
-          </section>
-        )}
-        {locked.length > 0 && (
-          <section aria-label="Locked capsules">
-            <h2 style={{ fontFamily: "'Patrick Hand',cursive", color: CREAM + "77", fontSize: 18, marginBottom: 16, letterSpacing: 1 }}>🔒 SEALED</h2>
-            {locked.map(e => <CapsuleCard key={e.id} e={e} locked={true} />)}
-          </section>
-        )}
-        {capsules.length === 0 && (
-          <p style={{ textAlign: "center", color: CREAM + "55", fontFamily: "'Patrick Hand',cursive", marginTop: 40, fontSize: 18 }}>
-            No capsules yet. Write one — your future self will thank you.
-          </p>
-        )}
       </main>
     </div>
   );
@@ -823,7 +719,6 @@ export default function SlamBook() {
         {page === "write" && <WritePage entries={entries} setEntries={setEntries} setPage={setPage} showToast={showToast} />}
         {page === "gallery" && <GalleryPage entries={entries} setEntries={setEntries} showToast={showToast} />}
         {page === "timeline" && <TimelinePage entries={entries} />}
-        {page === "open-later" && <OpenLaterPage entries={entries} />}
         {page === "settings" && <SettingsPage entries={entries} showToast={showToast} />}
 
         {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
