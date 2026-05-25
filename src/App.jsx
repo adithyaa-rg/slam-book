@@ -29,9 +29,9 @@ const CONFIG = {
   tagline: "A personal archive of notes, memories, and future letters.",
 
   emailjs: {
-    serviceId: "PASTE_YOUR_SERVICE_ID_HERE",
-    templateId: "PASTE_YOUR_TEMPLATE_ID_HERE",
-    publicKey: "PASTE_YOUR_PUBLIC_KEY_HERE",
+    serviceId: "service_1o9l95x",   // e.g. "service_abc123"
+    templateId: "template_lrdr1pl",  // e.g. "template_xyz789"
+    publicKey: "cQdNm5FLtsyrIlcOx",   // e.g. "user_XXXXX..."
   },
 };
 
