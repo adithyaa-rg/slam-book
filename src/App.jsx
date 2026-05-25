@@ -11,13 +11,46 @@ import { useState, useRef, useEffect, useCallback } from "react";
 //   4. Go to API Keys tab → create a key → copy it
 //   5. Paste both below ↓
 //
+// HOW TO SET UP EMAILJS (takes 3 minutes):
+//   1. Go to https://emailjs.com and sign up (free — 200 emails/month)
+//   2. Dashboard → Email Services → Add Service → choose Gmail
+//      • Connect your adithyaa2003@gmail.com account
+//      • Note the Service ID (e.g. "service_abc123")
+//   3. Dashboard → Email Templates → Create Template
+//      • Set "To Email" to: adithyaa2003@gmail.com
+//      • Set "From Email" to: adithyaa2003@gmail.com
+//      • Paste this template body (copy exactly):
+//
+//        New memory from: {{from_name}}
+//        Date: {{date}}
+//
+//        📝 Memory:
+//        {{memory}}
+//
+//        💬 Message:
+//        {{message}}
+//
+//        📎 Note:
+//        {{note}}
+//
+//      • Note the Template ID (e.g. "template_xyz789")
+//   4. Dashboard → Account → Public Key → copy it
+//   5. Paste all three below ↓
+//
 const CONFIG = {
   ownerName: "RG Adithyaa",
   tagline: "A personal archive of notes, memories, and future letters.",
 
   jsonbin: {
-    binId: "6a08436e250b1311c35b234d",   // e.g. "6642f1e1acd3cb34a83e1234"
-    apiKey: "$2a$10$pFOsONWycbhQ7wzLwhj6deXuhAGGfqXL9k09bOaUplSAhxAj4NeR2",  // e.g. "$2a$10$abcdef..."
+    binId: "6a08436e250b1311c35b234d",
+    apiKey: "$2a$10$pFOsONWycbhQ7wzLwhj6deXuhAGGfqXL9k09bOaUplSAhxAj4NeR2",
+  },
+
+  // ── EmailJS config ─────────────────────────────────────────────────────────
+  emailjs: {
+    serviceId: "PASTE_YOUR_SERVICE_ID_HERE",   // e.g. "service_abc123"
+    templateId: "PASTE_YOUR_TEMPLATE_ID_HERE",  // e.g. "template_xyz789"
+    publicKey: "PASTE_YOUR_PUBLIC_KEY_HERE",   // e.g. "user_XXXXX..."
   },
 };
 
@@ -47,6 +80,53 @@ async function saveEntriesToBin(entries) {
   });
   if (!res.ok) throw new Error(`JSONBin save failed: ${res.status}`);
   return res.json();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ██████████████████████   EMAILJS HELPER   ███████████████████████████████████
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isEmailConfigured() {
+  const { serviceId, templateId, publicKey } = CONFIG.emailjs;
+  return (
+    serviceId !== "PASTE_YOUR_SERVICE_ID_HERE" &&
+    templateId !== "PASTE_YOUR_TEMPLATE_ID_HERE" &&
+    publicKey !== "PASTE_YOUR_PUBLIC_KEY_HERE"
+  );
+}
+
+async function sendEmailNotification(entry) {
+  if (!isEmailConfigured()) return; // silently skip if not set up
+
+  const { serviceId, templateId, publicKey } = CONFIG.emailjs;
+
+  const templateParams = {
+    from_name: entry.name,
+    date: new Date(entry.date).toLocaleString("en-IN", {
+      day: "numeric", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    }),
+    memory: entry.memory || "(none)",
+    message: entry.message || "(none)",
+    note: entry.note || "(none)",
+    to_email: "adithyaa2003@gmail.com",
+  };
+
+  const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      service_id: serviceId,
+      template_id: templateId,
+      user_id: publicKey,
+      template_params: templateParams,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`EmailJS send failed: ${res.status} — ${text}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -415,7 +495,6 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
       memory,
       message,
       note,
-      // Blob URLs are local-only and won't survive reload — filenames are saved for reference
       mediaPreviews: mediaPreviews.map(p => ({ name: p.name, type: p.type, url: null })),
       emoji: rnd(EMOJIS),
       color: rnd(PALETTE),
@@ -424,11 +503,23 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
     };
 
     try {
+      // 1️⃣ Save to JSONBin
       const current = await loadEntriesFromBin();
       const updated = [entry, ...current];
       await saveEntriesToBin(updated);
       setEntries(updated);
-      showToast("Memory saved ✨");
+
+      // 2️⃣ Send email notification (non-blocking — failure won't break the save)
+      sendEmailNotification(entry)
+        .then(() => {
+          if (isEmailConfigured()) showToast("Memory saved & email sent ✨");
+          else showToast("Memory saved ✨");
+        })
+        .catch((err) => {
+          console.error("Email notification failed:", err);
+          showToast("Memory saved ✨ (email failed — check EmailJS config)");
+        });
+
       setPage("gallery");
     } catch (err) {
       console.error("JSONBin save failed:", err);
@@ -680,6 +771,7 @@ function SettingsPage({ entries, showToast }) {
           <h2 style={{ fontFamily: "'Caveat',cursive", fontSize: 28, color: NAVY, marginBottom: 4 }}>Status</h2>
           <Row label="Owner name" value={CONFIG.ownerName} status={true} />
           <Row label="JSONBin" value={isConfigured() ? "Connected ✓" : "Not configured"} status={isConfigured()} />
+          <Row label="EmailJS" value={isEmailConfigured() ? "Connected ✓" : "Not configured"} status={isEmailConfigured()} />
           <Row label="Memories stored" value={`${entries.length} entries`} status={true} />
         </section>
         <section style={{ background: "white", borderRadius: 18, padding: "24px 28px", boxShadow: "0 3px 16px rgba(0,0,0,.07)", marginBottom: 28 }}>
@@ -688,11 +780,17 @@ function SettingsPage({ entries, showToast }) {
             📥 Export all memories as JSON
           </button>
         </section>
-        <div style={{ background: "#EEF9F4", border: "1px solid #A7F3D0", borderRadius: 14, padding: "18px 22px" }}>
+        <div style={{ background: "#EEF9F4", border: "1px solid #A7F3D0", borderRadius: 14, padding: "18px 22px", marginBottom: 16 }}>
           <p style={{ fontFamily: "'Patrick Hand',cursive", color: "#065F46", fontSize: 15, lineHeight: 1.7 }}>
             ☁️ <strong>JSONBin.io</strong> stores all memories as a single JSON array in the cloud.
             Free tier: <strong>10,000 requests/month</strong>. Your <code>apiKey</code> is in the CONFIG —
             keep it private and don't share your code publicly with it included.
+          </p>
+        </div>
+        <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 14, padding: "18px 22px" }}>
+          <p style={{ fontFamily: "'Patrick Hand',cursive", color: "#1E40AF", fontSize: 15, lineHeight: 1.7 }}>
+            📧 <strong>EmailJS.com</strong> sends you an email every time someone saves a memory.
+            Free tier: <strong>200 emails/month</strong>. See the CONFIG comment at the top of the file for setup instructions.
           </p>
         </div>
       </main>
