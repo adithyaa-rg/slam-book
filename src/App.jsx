@@ -48,9 +48,9 @@ const CONFIG = {
 
   // ── EmailJS config ─────────────────────────────────────────────────────────
   emailjs: {
-    serviceId: "PASTE_YOUR_SERVICE_ID_HERE",   // e.g. "service_abc123"
-    templateId: "PASTE_YOUR_TEMPLATE_ID_HERE",  // e.g. "template_xyz789"
-    publicKey: "PASTE_YOUR_PUBLIC_KEY_HERE",   // e.g. "user_XXXXX..."
+    serviceId: "service_1o9l95x",   // e.g. "service_abc123"
+    templateId: "template_lrdr1pl",  // e.g. "template_xyz789"
+    publicKey: "cQdNm5FLtsyrIlcOx",   // e.g. "user_XXXXX..."
   },
 };
 
