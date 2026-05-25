@@ -1,8 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ██████████████████████   CONFIG   ███████████████████████████████████████████
+// ██████████████████████   EASY SETUP CONFIG   ████████████████████████████████
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// HOW TO SET UP JSONBIN (takes 2 minutes):
+//   1. Go to https://jsonbin.io and sign up (free)
+//   2. Click "+ Create Bin" → paste in [] (empty array) → Save
+//   3. Copy the Bin ID from the URL bar (looks like: 6642f1e1acd3cb34a83e1234)
+//   4. Go to API Keys tab → create a key → copy it
+//   5. Paste both below ↓
 //
 // HOW TO SET UP EMAILJS (takes 3 minutes):
 //   1. Go to https://emailjs.com and sign up (free — 200 emails/month)
@@ -10,15 +17,21 @@ import { useState, useRef, useEffect, useCallback } from "react";
 //      • Connect your adithyaa2003@gmail.com account
 //      • Note the Service ID (e.g. "service_abc123")
 //   3. Dashboard → Email Templates → Create Template
-//      • Set "To Email"   to: adithyaa2003@gmail.com
+//      • Set "To Email" to: adithyaa2003@gmail.com
 //      • Set "From Email" to: adithyaa2003@gmail.com
-//      • Body template:
+//      • Paste this template body (copy exactly):
 //
-//          New memory from: {{from_name}}
-//          Date: {{date}}
-//          Memory: {{memory}}
-//          Message: {{message}}
-//          Note: {{note}}
+//        New memory from: {{from_name}}
+//        Date: {{date}}
+//
+//        📝 Memory:
+//        {{memory}}
+//
+//        💬 Message:
+//        {{message}}
+//
+//        📎 Note:
+//        {{note}}
 //
 //      • Note the Template ID (e.g. "template_xyz789")
 //   4. Dashboard → Account → Public Key → copy it
@@ -28,6 +41,12 @@ const CONFIG = {
   ownerName: "RG Adithyaa",
   tagline: "A personal archive of notes, memories, and future letters.",
 
+  jsonbin: {
+    binId: "6a08436e250b1311c35b234d",
+    apiKey: "$2a$10$pFOsONWycbhQ7wzLwhj6deXuhAGGfqXL9k09bOaUplSAhxAj4NeR2",
+  },
+
+  // ── EmailJS config ─────────────────────────────────────────────────────────
   emailjs: {
     serviceId: "service_1o9l95x",   // e.g. "service_abc123"
     templateId: "template_lrdr1pl",  // e.g. "template_xyz789"
@@ -36,25 +55,31 @@ const CONFIG = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ██████████████████████   STORAGE HELPERS   ██████████████████████████████████
+// ██████████████████████   JSONBIN HELPERS   ██████████████████████████████████
 // ─────────────────────────────────────────────────────────────────────────────
-// Uses built-in artifact persistent storage — no sign-ups, no external services.
-// Data is shared across all users of this artifact (shared: true).
 
-const STORAGE_KEY = "slambook-entries";
+const JSONBIN_BASE = "https://api.jsonbin.io/v3";
 
-async function loadEntries() {
-  try {
-    const result = await window.storage.get(STORAGE_KEY, true);
-    const parsed = JSON.parse(result.value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return []; // key doesn't exist yet — first run
-  }
+async function loadEntriesFromBin() {
+  const res = await fetch(`${JSONBIN_BASE}/b/${CONFIG.jsonbin.binId}/latest`, {
+    headers: { "X-Master-Key": CONFIG.jsonbin.apiKey },
+  });
+  if (!res.ok) throw new Error(`JSONBin load failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data.record) ? data.record : [];
 }
 
-async function saveEntries(entries) {
-  await window.storage.set(STORAGE_KEY, JSON.stringify(entries), true);
+async function saveEntriesToBin(entries) {
+  const res = await fetch(`${JSONBIN_BASE}/b/${CONFIG.jsonbin.binId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": CONFIG.jsonbin.apiKey,
+    },
+    body: JSON.stringify(entries),
+  });
+  if (!res.ok) throw new Error(`JSONBin save failed: ${res.status}`);
+  return res.json();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,7 +96,7 @@ function isEmailConfigured() {
 }
 
 async function sendEmailNotification(entry) {
-  if (!isEmailConfigured()) return;
+  if (!isEmailConfigured()) return; // silently skip if not set up
 
   const { serviceId, templateId, publicKey } = CONFIG.emailjs;
 
@@ -121,6 +146,12 @@ function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function fmtDate(s) {
   return new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
 }
+function isConfigured() {
+  return (
+    CONFIG.jsonbin.binId !== "PASTE_YOUR_BIN_ID_HERE" &&
+    CONFIG.jsonbin.apiKey !== "PASTE_YOUR_API_KEY_HERE"
+  );
+}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const CSS = `
@@ -136,13 +167,17 @@ body { overflow-x: hidden; }
   transition: top .2s;
 }
 .skip-link:focus { top: 0; }
+
 :focus-visible { outline: 3px solid ${RED}; outline-offset: 3px; }
 
 @keyframes floatUp {
   0%, 100% { transform: translateY(0); }
   50%       { transform: translateY(-12px); }
 }
-.doodle { animation: floatUp 5s ease-in-out infinite; position: absolute; pointer-events: none; opacity: .18; }
+.doodle {
+  animation: floatUp 5s ease-in-out infinite;
+  position: absolute; pointer-events: none; opacity: .18;
+}
 
 .btn-cta {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -211,6 +246,16 @@ body { overflow-x: hidden; }
 .nav-pill:hover  { opacity: 1; }
 .nav-pill.active { opacity: 1; background: rgba(255,255,255,.12); }
 
+.media-grid { display: grid; gap: 6px; margin-top: 10px; }
+.media-grid.cols-1 { grid-template-columns: 1fr; }
+.media-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.media-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+.media-img {
+  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 6px;
+  cursor: pointer; transition: opacity .15s;
+}
+.media-img:hover { opacity: .85; }
+
 .lightbox-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 9000;
   display: flex; align-items: center; justify-content: center;
@@ -245,6 +290,13 @@ body { overflow-x: hidden; }
 }
 .field-error { color: ${RED}; font-family: 'Patrick Hand', cursive; font-size: 14px; margin-top: 6px; }
 
+.config-warn {
+  background: #FEF3C7; border: 2px solid #F59E0B; border-radius: 14px;
+  padding: 20px 24px; margin: 0 auto 32px; max-width: 680px;
+  font-family: 'Patrick Hand', cursive; font-size: 16px; color: #92400E; line-height: 1.7;
+}
+.config-warn strong { display: block; font-size: 18px; margin-bottom: 6px; }
+
 @media (max-width: 680px) {
   .nav-label { display: none; }
   .nav-pill   { font-size: 22px; padding: 8px; }
@@ -275,6 +327,47 @@ function Lightbox({ src, onClose }) {
     <div className="lightbox-overlay" onClick={onClose} role="dialog" aria-modal="true">
       <button className="lightbox-close" onClick={onClose} aria-label="Close">×</button>
       <img src={src} alt="Memory" onClick={(e) => e.stopPropagation()} />
+    </div>
+  );
+}
+
+// ─── Media grid ───────────────────────────────────────────────────────────────
+function MediaGrid({ previews }) {
+  const [lightbox, setLightbox] = useState(null);
+  if (!previews || previews.length === 0) return null;
+  const imgs = previews.filter((p) => p.type === "image" && p.url);
+  const other = previews.filter((p) => p.type !== "image");
+  const cols = imgs.length === 1 ? "cols-1" : imgs.length === 2 ? "cols-2" : "cols-3";
+  return (
+    <>
+      {imgs.length > 0 && (
+        <div className={`media-grid ${cols}`}>
+          {imgs.map((p, i) => (
+            <img key={i} src={p.url} alt={p.name} className="media-img"
+              onClick={() => setLightbox(p.url)}
+              onKeyDown={(e) => e.key === "Enter" && setLightbox(p.url)}
+              tabIndex={0} role="button" aria-label={`View: ${p.name}`} />
+          ))}
+        </div>
+      )}
+      {other.map((p, i) => (
+        <div key={i} style={{ background: "rgba(255,255,255,.5)", borderRadius: 999, padding: "4px 10px", marginTop: 6, fontSize: 13 }}>
+          📎 {p.name}
+        </div>
+      ))}
+      {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
+    </>
+  );
+}
+
+// ─── Config warning ───────────────────────────────────────────────────────────
+function ConfigWarn() {
+  if (isConfigured()) return null;
+  return (
+    <div className="config-warn">
+      <strong>⚠️ JSONBin not configured yet</strong>
+      Open <code>SlamBook.jsx</code> and fill in your <code>binId</code> and <code>apiKey</code> in the CONFIG block at the top.
+      Sign up free at <strong>jsonbin.io</strong> — takes 2 minutes!
     </div>
   );
 }
@@ -334,6 +427,7 @@ function HomePage({ setPage, entries }) {
         </div>
       ))}
       <main id="main-content" style={{ maxWidth: 900, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
+        <ConfigWarn />
         <p style={{ fontFamily: "'Patrick Hand',cursive", letterSpacing: 3, color: RED, marginBottom: 16, fontSize: 13 }}>
           PERSONAL MEMORY VAULT
         </p>
@@ -389,6 +483,7 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
 
   const submit = async () => {
     if (!memory.trim()) { setErrors({ memory: "Please share at least a short memory." }); return; }
+    if (!isConfigured()) { showToast("⚠️ Please configure JSONBin first!"); return; }
     setErrors({});
     setSaving(true);
 
@@ -408,16 +503,17 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
     };
 
     try {
-      // 1️⃣ Load current entries, prepend new one, save back
-      const current = await loadEntries();
+      // 1️⃣ Save to JSONBin
+      const current = await loadEntriesFromBin();
       const updated = [entry, ...current];
-      await saveEntries(updated);
+      await saveEntriesToBin(updated);
       setEntries(updated);
 
-      // 2️⃣ Send email notification (non-blocking)
+      // 2️⃣ Send email notification (non-blocking — failure won't break the save)
       sendEmailNotification(entry)
         .then(() => {
-          showToast(isEmailConfigured() ? "Memory saved & email sent ✨" : "Memory saved ✨");
+          if (isEmailConfigured()) showToast("Memory saved & email sent ✨");
+          else showToast("Memory saved ✨");
         })
         .catch((err) => {
           console.error("Email notification failed:", err);
@@ -426,8 +522,8 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
 
       setPage("gallery");
     } catch (err) {
-      console.error("Storage save failed:", err);
-      showToast("❌ Save failed — please try again.");
+      console.error("JSONBin save failed:", err);
+      showToast("❌ Save failed — check your JSONBin config.");
     } finally {
       setSaving(false);
     }
@@ -541,21 +637,22 @@ function GalleryPage({ entries, setEntries, showToast }) {
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(false);
 
-  const syncEntries = useCallback(async () => {
+  const syncFromBin = useCallback(async () => {
+    if (!isConfigured()) { showToast("⚠️ Configure JSONBin first!"); return; }
     setLoading(true);
     try {
-      const loaded = await loadEntries();
+      const loaded = await loadEntriesFromBin();
       setEntries(loaded);
-      showToast(`Loaded ${loaded.length} memories ✨`);
+      showToast(`Loaded ${loaded.length} memories ☁️`);
     } catch (err) {
       console.error(err);
-      showToast("❌ Couldn't load memories.");
+      showToast("❌ Couldn't load from JSONBin.");
     } finally {
       setLoading(false);
     }
   }, [setEntries, showToast]);
 
-  useEffect(() => { syncEntries(); }, []);
+  useEffect(() => { syncFromBin(); }, []);
 
   const shown = entries.filter(e => {
     if (filter === "all") return true;
@@ -569,9 +666,9 @@ function GalleryPage({ entries, setEntries, showToast }) {
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 56, color: NAVY }}>memory wall 📸</h1>
           <div style={{ marginTop: 14 }}>
-            <button className="btn-ghost" onClick={syncEntries} disabled={loading}
+            <button className="btn-ghost" onClick={syncFromBin} disabled={loading}
               style={{ fontSize: 16, padding: "10px 22px" }}>
-              {loading ? "Loading… ⏳" : "🔄 Refresh memories"}
+              {loading ? "Loading… ⏳" : "☁️ Refresh memories"}
             </button>
           </div>
           <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 20 }}
@@ -673,7 +770,7 @@ function SettingsPage({ entries, showToast }) {
         <section style={{ background: "white", borderRadius: 18, padding: "24px 28px", boxShadow: "0 3px 16px rgba(0,0,0,.07)", marginBottom: 28 }}>
           <h2 style={{ fontFamily: "'Caveat',cursive", fontSize: 28, color: NAVY, marginBottom: 4 }}>Status</h2>
           <Row label="Owner name" value={CONFIG.ownerName} status={true} />
-          <Row label="Storage" value="Built-in (no setup needed) ✓" status={true} />
+          <Row label="JSONBin" value={isConfigured() ? "Connected ✓" : "Not configured"} status={isConfigured()} />
           <Row label="EmailJS" value={isEmailConfigured() ? "Connected ✓" : "Not configured"} status={isEmailConfigured()} />
           <Row label="Memories stored" value={`${entries.length} entries`} status={true} />
         </section>
@@ -685,8 +782,9 @@ function SettingsPage({ entries, showToast }) {
         </section>
         <div style={{ background: "#EEF9F4", border: "1px solid #A7F3D0", borderRadius: 14, padding: "18px 22px", marginBottom: 16 }}>
           <p style={{ fontFamily: "'Patrick Hand',cursive", color: "#065F46", fontSize: 15, lineHeight: 1.7 }}>
-            💾 <strong>Storage</strong> is handled by Claude's built-in artifact storage — no external services or sign-ups needed.
-            Memories persist across sessions and are shared with everyone who opens this artifact.
+            ☁️ <strong>JSONBin.io</strong> stores all memories as a single JSON array in the cloud.
+            Free tier: <strong>10,000 requests/month</strong>. Your <code>apiKey</code> is in the CONFIG —
+            keep it private and don't share your code publicly with it included.
           </p>
         </div>
         <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 14, padding: "18px 22px" }}>
@@ -707,11 +805,6 @@ export default function SlamBook() {
   const [toast, setToast] = useState(null);
 
   const showToast = useCallback((msg) => setToast(msg), []);
-
-  // Load entries on first mount
-  useEffect(() => {
-    loadEntries().then(setEntries).catch(console.error);
-  }, []);
 
   return (
     <>
