@@ -1,15 +1,27 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  orderBy,
+  query,
+} from "firebase/firestore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ██████████████████████   EASY SETUP CONFIG   ████████████████████████████████
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// HOW TO SET UP JSONBIN (takes 2 minutes):
-//   1. Go to https://jsonbin.io and sign up (free)
-//   2. Click "+ Create Bin" → paste in [] (empty array) → Save
-//   3. Copy the Bin ID from the URL bar (looks like: 6642f1e1acd3cb34a83e1234)
-//   4. Go to API Keys tab → create a key → copy it
-//   5. Paste both below ↓
+// HOW TO SET UP FIREBASE (takes 3 minutes, completely free):
+//   1. Go to https://console.firebase.google.com and sign in with Google
+//   2. Click "Add project" → name it anything → Continue (disable Analytics is fine)
+//   3. Once created, click the </> (Web) icon to add a web app
+//      → Register app (any nickname) → you'll see a firebaseConfig object
+//      → Copy the values into CONFIG.firebase below
+//   4. In the left sidebar → Build → Firestore Database → Create database
+//      → Start in TEST MODE → choose any region → Enable
+//   5. That's it! Firestore is now ready.
 //
 // HOW TO SET UP EMAILJS (takes 3 minutes):
 //   1. Go to https://emailjs.com and sign up (free — 200 emails/month)
@@ -18,20 +30,13 @@ import { useState, useRef, useEffect, useCallback } from "react";
 //      • Note the Service ID (e.g. "service_abc123")
 //   3. Dashboard → Email Templates → Create Template
 //      • Set "To Email" to: adithyaa2003@gmail.com
-//      • Set "From Email" to: adithyaa2003@gmail.com
-//      • Paste this template body (copy exactly):
+//      • Paste this template body:
 //
 //        New memory from: {{from_name}}
 //        Date: {{date}}
-//
-//        📝 Memory:
-//        {{memory}}
-//
-//        💬 Message:
-//        {{message}}
-//
-//        📎 Note:
-//        {{note}}
+//        📝 Memory: {{memory}}
+//        💬 Message: {{message}}
+//        📎 Note: {{note}}
 //
 //      • Note the Template ID (e.g. "template_xyz789")
 //   4. Dashboard → Account → Public Key → copy it
@@ -41,45 +46,53 @@ const CONFIG = {
   ownerName: "RG Adithyaa",
   tagline: "A personal archive of notes, memories, and future letters.",
 
-  jsonbin: {
-    binId: "6a08436e250b1311c35b234d",
-    apiKey: "$2a$10$pFOsONWycbhQ7wzLwhj6deXuhAGGfqXL9k09bOaUplSAhxAj4NeR2",
+  // ── Firebase config — copy from your Firebase console ─────────────────────
+  firebase: {
+    apiKey: "AIzaSyDvvOAiDGI9w018lh_WH7gTfKZhyORU_bs",
+    authDomain: "slam-3198e.firebaseapp.com",
+    projectId: "slam-3198e",
+    storageBucket: "slam-3198e.firebasestorage.app",
+    messagingSenderId: "81034722488",
+    appId: "1:81034722488:web:1c5173ae0a988b4f1c484d",
+    measurementId: "G-2VVW4WB8HX",
   },
 
   // ── EmailJS config ─────────────────────────────────────────────────────────
   emailjs: {
-    serviceId: "service_1o9l95x",   // e.g. "service_abc123"
-    templateId: "template_lrdr1pl",  // e.g. "template_xyz789"
-    publicKey: "cQdNm5FLtsyrIlcOx",   // e.g. "user_XXXXX..."
+    serviceId: "service_1o9l95x",
+    templateId: "template_lrdr1pl",
+    publicKey: "cQdNm5FLtsyrIlcOx",
   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ██████████████████████   JSONBIN HELPERS   ██████████████████████████████████
+// ██████████████████████   FIREBASE HELPERS   █████████████████████████████████
 // ─────────────────────────────────────────────────────────────────────────────
 
-const JSONBIN_BASE = "https://api.jsonbin.io/v3";
+let _app = null;
+let _db = null;
 
-async function loadEntriesFromBin() {
-  const res = await fetch(`${JSONBIN_BASE}/b/${CONFIG.jsonbin.binId}/latest`, {
-    headers: { "X-Master-Key": CONFIG.jsonbin.apiKey },
-  });
-  if (!res.ok) throw new Error(`JSONBin load failed: ${res.status}`);
-  const data = await res.json();
-  return Array.isArray(data.record) ? data.record : [];
+function getDB() {
+  if (_db) return _db;
+  if (!isConfigured()) throw new Error("Firebase not configured.");
+  _app = initializeApp(CONFIG.firebase);
+  _db = getFirestore(_app);
+  return _db;
 }
 
-async function saveEntriesToBin(entries) {
-  const res = await fetch(`${JSONBIN_BASE}/b/${CONFIG.jsonbin.binId}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Master-Key": CONFIG.jsonbin.apiKey,
-    },
-    body: JSON.stringify(entries),
-  });
-  if (!res.ok) throw new Error(`JSONBin save failed: ${res.status}`);
-  return res.json();
+const COLLECTION = "memories";
+
+async function loadEntriesFromFirestore() {
+  const db = getDB();
+  const q = query(collection(db, COLLECTION), orderBy("date", "desc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((doc) => ({ _docId: doc.id, ...doc.data() }));
+}
+
+async function saveEntryToFirestore(entry) {
+  const db = getDB();
+  const docRef = await addDoc(collection(db, COLLECTION), entry);
+  return { _docId: docRef.id, ...entry };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,22 +109,22 @@ function isEmailConfigured() {
 }
 
 async function sendEmailNotification(entry) {
-  if (!isEmailConfigured()) return; // silently skip if not set up
-
+  if (!isEmailConfigured()) return;
   const { serviceId, templateId, publicKey } = CONFIG.emailjs;
-
   const templateParams = {
     from_name: entry.name,
     date: new Date(entry.date).toLocaleString("en-IN", {
-      day: "numeric", month: "long", year: "numeric",
-      hour: "2-digit", minute: "2-digit",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     }),
     memory: entry.memory || "(none)",
     message: entry.message || "(none)",
     note: entry.note || "(none)",
     to_email: "adithyaa2003@gmail.com",
   };
-
   const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -122,7 +135,6 @@ async function sendEmailNotification(entry) {
       template_params: templateParams,
     }),
   });
-
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`EmailJS send failed: ${res.status} — ${text}`);
@@ -140,17 +152,33 @@ const CREAM = "#FFFDF7";
 const SAGE = "#A3B18A";
 
 const PALETTE = [PINK, SAGE, CREAM, "#EDE0D4", "#D4E6F1", "#E8D5C4"];
-const EMOJIS = ["💌", "🌸", "✨", "🎵", "🌿", "🧡", "💛", "🦋", "📝", "🌙", "🎨", "🌻"];
+const EMOJIS = [
+  "💌",
+  "🌸",
+  "✨",
+  "🎵",
+  "🌿",
+  "🧡",
+  "💛",
+  "🦋",
+  "📝",
+  "🌙",
+  "🎨",
+  "🌻",
+];
 
-function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function rnd(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 function fmtDate(s) {
-  return new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+  return new Date(s).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 }
 function isConfigured() {
-  return (
-    CONFIG.jsonbin.binId !== "PASTE_YOUR_BIN_ID_HERE" &&
-    CONFIG.jsonbin.apiKey !== "PASTE_YOUR_API_KEY_HERE"
-  );
+  return CONFIG.firebase.apiKey !== "PASTE_YOUR_API_KEY";
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -163,11 +191,10 @@ body { overflow-x: hidden; }
 
 .skip-link {
   position: absolute; top: -40px; left: 0; background: ${RED}; color: white;
-  padding: 8px 16px; z-index: 9999; font-family: 'Nunito', sans-serif; border-radius: 0 0 8px 0;
-  transition: top .2s;
+  padding: 8px 16px; z-index: 9999; font-family: 'Nunito', sans-serif;
+  border-radius: 0 0 8px 0; transition: top .2s;
 }
 .skip-link:focus { top: 0; }
-
 :focus-visible { outline: 3px solid ${RED}; outline-offset: 3px; }
 
 @keyframes floatUp {
@@ -221,20 +248,26 @@ body { overflow-x: hidden; }
   box-shadow: 0 4px 20px rgba(0,0,0,.1);
   transition: transform .2s, box-shadow .2s; border-radius: 4px;
 }
-.polaroid:hover { transform: translateY(-6px) rotate(0deg) !important; box-shadow: 0 12px 32px rgba(0,0,0,.18); }
+.polaroid:hover {
+  transform: translateY(-6px) rotate(0deg) !important;
+  box-shadow: 0 12px 32px rgba(0,0,0,.18);
+}
 
 .upload-zone {
   border: 2px dashed ${NAVY}33; border-radius: 16px; padding: 32px;
   text-align: center; cursor: pointer; transition: border-color .2s, background .2s;
 }
-.upload-zone:hover, .upload-zone:focus-within { border-color: ${RED}; background: ${PINK}22; }
+.upload-zone:hover, .upload-zone:focus-within {
+  border-color: ${RED}; background: ${PINK}22;
+}
 
 .filter-pill {
   border-radius: 999px; border: 1.5px solid ${NAVY}22; padding: 8px 18px;
   background: white; cursor: pointer; font-family: 'Patrick Hand', cursive;
-  font-size: 15px; transition: background .15s, border-color .15s, color .15s; min-height: 40px;
+  font-size: 15px; transition: background .15s, border-color .15s, color .15s;
+  min-height: 40px;
 }
-.filter-pill:hover { border-color: ${NAVY}55; }
+.filter-pill:hover  { border-color: ${NAVY}55; }
 .filter-pill.active { background: ${NAVY}; color: white; border-color: ${NAVY}; }
 
 .nav-pill {
@@ -246,29 +279,10 @@ body { overflow-x: hidden; }
 .nav-pill:hover  { opacity: 1; }
 .nav-pill.active { opacity: 1; background: rgba(255,255,255,.12); }
 
-.media-grid { display: grid; gap: 6px; margin-top: 10px; }
-.media-grid.cols-1 { grid-template-columns: 1fr; }
-.media-grid.cols-2 { grid-template-columns: 1fr 1fr; }
-.media-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
-.media-img {
-  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 6px;
-  cursor: pointer; transition: opacity .15s;
-}
-.media-img:hover { opacity: .85; }
-
-.lightbox-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 9000;
-  display: flex; align-items: center; justify-content: center;
-}
-.lightbox-overlay img { max-width: 92vw; max-height: 92vh; border-radius: 8px; }
-.lightbox-close {
-  position: fixed; top: 20px; right: 24px; background: none; border: none;
-  color: white; font-size: 36px; cursor: pointer; z-index: 9001; line-height: 1;
-}
-
 .badge {
   display: inline-flex; align-items: center; gap: 4px;
-  font-family: 'Patrick Hand', cursive; font-size: 12px; padding: 3px 10px; border-radius: 999px;
+  font-family: 'Patrick Hand', cursive; font-size: 12px;
+  padding: 3px 10px; border-radius: 999px;
 }
 .badge-wall { background: ${SAGE}44; color: ${NAVY}; }
 
@@ -288,18 +302,21 @@ body { overflow-x: hidden; }
   display: block; font-family: 'Patrick Hand', cursive; font-size: 15px;
   color: ${NAVY}99; margin-bottom: 8px;
 }
-.field-error { color: ${RED}; font-family: 'Patrick Hand', cursive; font-size: 14px; margin-top: 6px; }
+.field-error {
+  color: ${RED}; font-family: 'Patrick Hand', cursive; font-size: 14px; margin-top: 6px;
+}
 
 .config-warn {
   background: #FEF3C7; border: 2px solid #F59E0B; border-radius: 14px;
   padding: 20px 24px; margin: 0 auto 32px; max-width: 680px;
-  font-family: 'Patrick Hand', cursive; font-size: 16px; color: #92400E; line-height: 1.7;
+  font-family: 'Patrick Hand', cursive; font-size: 16px;
+  color: #92400E; line-height: 1.7;
 }
 .config-warn strong { display: block; font-size: 18px; margin-bottom: 6px; }
 
 @media (max-width: 680px) {
   .nav-label { display: none; }
-  .nav-pill   { font-size: 22px; padding: 8px; }
+  .nav-pill  { font-size: 22px; padding: 8px; }
 }
 `;
 
@@ -312,51 +329,67 @@ const DOODLES = [
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function Toast({ msg, onDone }) {
-  useEffect(() => { const t = setTimeout(onDone, 2800); return () => clearTimeout(t); }, [onDone]);
-  return <div className="toast" role="status" aria-live="polite">{msg}</div>;
+  useEffect(() => {
+    const t = setTimeout(onDone, 2800);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return (
+    <div className="toast" role="status" aria-live="polite">
+      {msg}
+    </div>
+  );
 }
 
 // ─── Lightbox ─────────────────────────────────────────────────────────────────
 function Lightbox({ src, onClose }) {
   useEffect(() => {
-    const fn = (e) => { if (e.key === "Escape") onClose(); };
+    const fn = (e) => {
+      if (e.key === "Escape") onClose();
+    };
     document.addEventListener("keydown", fn);
     return () => document.removeEventListener("keydown", fn);
   }, [onClose]);
   return (
-    <div className="lightbox-overlay" onClick={onClose} role="dialog" aria-modal="true">
-      <button className="lightbox-close" onClick={onClose} aria-label="Close">×</button>
-      <img src={src} alt="Memory" onClick={(e) => e.stopPropagation()} />
+    <div
+      className="lightbox-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.88)",
+        zIndex: 9000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <button
+        onClick={onClose}
+        aria-label="Close"
+        style={{
+          position: "fixed",
+          top: 20,
+          right: 24,
+          background: "none",
+          border: "none",
+          color: "white",
+          fontSize: 36,
+          cursor: "pointer",
+          zIndex: 9001,
+          lineHeight: 1,
+        }}
+      >
+        ×
+      </button>
+      <img
+        src={src}
+        alt="Memory"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: "92vw", maxHeight: "92vh", borderRadius: 8 }}
+      />
     </div>
-  );
-}
-
-// ─── Media grid ───────────────────────────────────────────────────────────────
-function MediaGrid({ previews }) {
-  const [lightbox, setLightbox] = useState(null);
-  if (!previews || previews.length === 0) return null;
-  const imgs = previews.filter((p) => p.type === "image" && p.url);
-  const other = previews.filter((p) => p.type !== "image");
-  const cols = imgs.length === 1 ? "cols-1" : imgs.length === 2 ? "cols-2" : "cols-3";
-  return (
-    <>
-      {imgs.length > 0 && (
-        <div className={`media-grid ${cols}`}>
-          {imgs.map((p, i) => (
-            <img key={i} src={p.url} alt={p.name} className="media-img"
-              onClick={() => setLightbox(p.url)}
-              onKeyDown={(e) => e.key === "Enter" && setLightbox(p.url)}
-              tabIndex={0} role="button" aria-label={`View: ${p.name}`} />
-          ))}
-        </div>
-      )}
-      {other.map((p, i) => (
-        <div key={i} style={{ background: "rgba(255,255,255,.5)", borderRadius: 999, padding: "4px 10px", marginTop: 6, fontSize: 13 }}>
-          📎 {p.name}
-        </div>
-      ))}
-      {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
-    </>
   );
 }
 
@@ -365,9 +398,11 @@ function ConfigWarn() {
   if (isConfigured()) return null;
   return (
     <div className="config-warn">
-      <strong>⚠️ JSONBin not configured yet</strong>
-      Open <code>SlamBook.jsx</code> and fill in your <code>binId</code> and <code>apiKey</code> in the CONFIG block at the top.
-      Sign up free at <strong>jsonbin.io</strong> — takes 2 minutes!
+      <strong>⚠️ Firebase not configured yet</strong>
+      Open <code>SlamBook.jsx</code> and fill in your Firebase project details
+      in the
+      <code> CONFIG.firebase</code> block at the top. Sign up free at{" "}
+      <strong>console.firebase.google.com</strong> — takes 3 minutes!
     </div>
   );
 }
@@ -382,21 +417,45 @@ const NAV_ITEMS = [
 
 function Nav({ page, setPage }) {
   return (
-    <nav aria-label="Main navigation" style={{
-      position: "fixed", top: 0, left: 0, right: 0, zIndex: 100,
-      background: NAVY, display: "flex", justifyContent: "space-between",
-      alignItems: "center", padding: "12px 24px", boxShadow: "0 2px 12px rgba(0,0,0,.15)",
-    }}>
-      <button onClick={() => setPage("home")} style={{
-        border: "none", background: "none", color: CREAM,
-        fontFamily: "'Caveat',cursive", fontSize: 26, cursor: "pointer",
-      }} aria-label="Memory Vault home">
+    <nav
+      aria-label="Main navigation"
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 100,
+        background: NAVY,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "12px 24px",
+        boxShadow: "0 2px 12px rgba(0,0,0,.15)",
+      }}
+    >
+      <button
+        onClick={() => setPage("home")}
+        style={{
+          border: "none",
+          background: "none",
+          color: CREAM,
+          fontFamily: "'Caveat',cursive",
+          fontSize: 26,
+          cursor: "pointer",
+        }}
+        aria-label="Memory Vault home"
+      >
         💌 memory vault
       </button>
       <div style={{ display: "flex", gap: 4 }} role="list">
         {NAV_ITEMS.map(([p, icon, label]) => (
-          <button key={p} className={`nav-pill${page === p ? " active" : ""}`}
-            onClick={() => setPage(p)} aria-current={page === p ? "page" : undefined} role="listitem">
+          <button
+            key={p}
+            className={`nav-pill${page === p ? " active" : ""}`}
+            onClick={() => setPage(p)}
+            aria-current={page === p ? "page" : undefined}
+            role="listitem"
+          >
             <span aria-hidden="true">{icon}</span>{" "}
             <span className="nav-label">{label}</span>
           </button>
@@ -410,40 +469,139 @@ function Nav({ page, setPage }) {
 function Stat({ icon, value, label }) {
   return (
     <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 28 }} aria-hidden="true">{icon}</div>
-      <div style={{ fontFamily: "'Caveat',cursive", fontSize: 40, color: NAVY, lineHeight: 1.1 }}>{value}</div>
-      <div style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", fontSize: 15 }}>{label}</div>
+      <div style={{ fontSize: 28 }} aria-hidden="true">
+        {icon}
+      </div>
+      <div
+        style={{
+          fontFamily: "'Caveat',cursive",
+          fontSize: 40,
+          color: NAVY,
+          lineHeight: 1.1,
+        }}
+      >
+        {value}
+      </div>
+      <div
+        style={{
+          fontFamily: "'Patrick Hand',cursive",
+          color: NAVY + "88",
+          fontSize: 15,
+        }}
+      >
+        {label}
+      </div>
     </div>
   );
 }
 
 function HomePage({ setPage, entries }) {
   return (
-    <div style={{ minHeight: "100vh", background: CREAM, position: "relative", overflow: "hidden", paddingTop: 90 }}>
+    <div
+      style={{
+        minHeight: "100vh",
+        background: CREAM,
+        position: "relative",
+        overflow: "hidden",
+        paddingTop: 90,
+      }}
+    >
       {DOODLES.map((d, i) => (
-        <div key={i} className="doodle" aria-hidden="true"
-          style={{ left: d.x, top: d.y, fontSize: d.sz, color: d.col, animationDelay: `${d.delay}s` }}>
+        <div
+          key={i}
+          className="doodle"
+          aria-hidden="true"
+          style={{
+            left: d.x,
+            top: d.y,
+            fontSize: d.sz,
+            color: d.col,
+            animationDelay: `${d.delay}s`,
+          }}
+        >
           {d.ch}
         </div>
       ))}
-      <main id="main-content" style={{ maxWidth: 900, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
+      <main
+        id="main-content"
+        style={{
+          maxWidth: 900,
+          margin: "0 auto",
+          padding: "80px 24px",
+          textAlign: "center",
+        }}
+      >
         <ConfigWarn />
-        <p style={{ fontFamily: "'Patrick Hand',cursive", letterSpacing: 3, color: RED, marginBottom: 16, fontSize: 13 }}>
+        <p
+          style={{
+            fontFamily: "'Patrick Hand',cursive",
+            letterSpacing: 3,
+            color: RED,
+            marginBottom: 16,
+            fontSize: 13,
+          }}
+        >
           PERSONAL MEMORY VAULT
         </p>
-        <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: "clamp(52px,10vw,96px)", color: NAVY, lineHeight: 1, marginBottom: 18 }}>
-          {CONFIG.ownerName}'s<br />Digital Slam Book
+        <h1
+          style={{
+            fontFamily: "'Caveat',cursive",
+            fontSize: "clamp(52px,10vw,96px)",
+            color: NAVY,
+            lineHeight: 1,
+            marginBottom: 18,
+          }}
+        >
+          {CONFIG.ownerName}'s
+          <br />
+          Digital Slam Book
         </h1>
-        <p style={{ maxWidth: 680, margin: "0 auto 40px", color: NAVY + "bb", lineHeight: 1.8, fontSize: 18 }}>
+        <p
+          style={{
+            maxWidth: 680,
+            margin: "0 auto 40px",
+            color: NAVY + "bb",
+            lineHeight: 1.8,
+            fontSize: 18,
+          }}
+        >
           {CONFIG.tagline}
         </p>
-        <div style={{ display: "flex", justifyContent: "center", gap: 16, flexWrap: "wrap", marginBottom: 56 }}>
-          <button className="btn-cta" onClick={() => setPage("write")}>💌 Write Something</button>
-          <button className="btn-ghost" onClick={() => setPage("gallery")}>📸 Open Memory Wall</button>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 16,
+            flexWrap: "wrap",
+            marginBottom: 56,
+          }}
+        >
+          <button className="btn-cta" onClick={() => setPage("write")}>
+            💌 Write Something
+          </button>
+          <button className="btn-ghost" onClick={() => setPage("gallery")}>
+            📸 Open Memory Wall
+          </button>
         </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 48, flexWrap: "wrap" }} aria-label="Stats">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 48,
+            flexWrap: "wrap",
+          }}
+          aria-label="Stats"
+        >
           <Stat icon="💌" value={entries.length} label="memories" />
-          <Stat icon="🌸" value={entries.filter(e => e.mediaPreviews?.some(p => p.type === "image")).length} label="photo memories" />
+          <Stat
+            icon="🌸"
+            value={
+              entries.filter((e) =>
+                e.mediaPreviews?.some((p) => p.type === "image"),
+              ).length
+            }
+            label="photo memories"
+          />
         </div>
       </main>
     </div>
@@ -454,9 +612,15 @@ function HomePage({ setPage, entries }) {
 function FieldWrapper({ label, id, err, children }) {
   return (
     <div className="field-group" role="group" aria-labelledby={`lbl-${id}`}>
-      <label id={`lbl-${id}`} className="field-label">{label}</label>
+      <label id={`lbl-${id}`} className="field-label">
+        {label}
+      </label>
       {children}
-      {err && <p className="field-error" role="alert">{err}</p>}
+      {err && (
+        <p className="field-error" role="alert">
+          {err}
+        </p>
+      )}
     </div>
   );
 }
@@ -473,7 +637,7 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
   const fileRef = useRef();
 
   const handleFiles = (fileList) => {
-    const previews = Array.from(fileList).map(f => ({
+    const previews = Array.from(fileList).map((f) => ({
       name: f.name,
       type: f.type.startsWith("image/") ? "image" : "other",
       url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
@@ -482,8 +646,14 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
   };
 
   const submit = async () => {
-    if (!memory.trim()) { setErrors({ memory: "Please share at least a short memory." }); return; }
-    if (!isConfigured()) { showToast("⚠️ Please configure JSONBin first!"); return; }
+    if (!memory.trim()) {
+      setErrors({ memory: "Please share at least a short memory." });
+      return;
+    }
+    if (!isConfigured()) {
+      showToast("⚠️ Please configure Firebase first!");
+      return;
+    }
     setErrors({});
     setSaving(true);
 
@@ -495,7 +665,12 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
       memory,
       message,
       note,
-      mediaPreviews: mediaPreviews.map(p => ({ name: p.name, type: p.type, url: null })),
+      // We only store file names — actual files aren't uploaded to keep setup simple
+      mediaPreviews: mediaPreviews.map((p) => ({
+        name: p.name,
+        type: p.type,
+        url: null,
+      })),
       emoji: rnd(EMOJIS),
       color: rnd(PALETTE),
       rot: Math.random() * 6 - 3,
@@ -503,17 +678,18 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
     };
 
     try {
-      // 1️⃣ Save to JSONBin
-      const current = await loadEntriesFromBin();
-      const updated = [entry, ...current];
-      await saveEntriesToBin(updated);
-      setEntries(updated);
+      // 1️⃣ Save to Firestore
+      const saved = await saveEntryToFirestore(entry);
+      setEntries((prev) => [saved, ...prev]);
 
-      // 2️⃣ Send email notification (non-blocking — failure won't break the save)
+      // 2️⃣ Email notification (non-blocking)
       sendEmailNotification(entry)
         .then(() => {
-          if (isEmailConfigured()) showToast("Memory saved & email sent ✨");
-          else showToast("Memory saved ✨");
+          showToast(
+            isEmailConfigured()
+              ? "Memory saved & email sent ✨"
+              : "Memory saved ✨",
+          );
         })
         .catch((err) => {
           console.error("Email notification failed:", err);
@@ -522,8 +698,8 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
 
       setPage("gallery");
     } catch (err) {
-      console.error("JSONBin save failed:", err);
-      showToast("❌ Save failed — check your JSONBin config.");
+      console.error("Firestore save failed:", err);
+      showToast("❌ Save failed — check your Firebase config.");
     } finally {
       setSaving(false);
     }
@@ -531,60 +707,151 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
 
   return (
     <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
-      <main id="main-content" style={{ maxWidth: 720, margin: "0 auto", padding: "40px 24px" }}>
-        <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 58, color: NAVY, marginBottom: 8 }}>write something 💌</h1>
-        <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginBottom: 36 }}>
+      <main
+        id="main-content"
+        style={{ maxWidth: 720, margin: "0 auto", padding: "40px 24px" }}
+      >
+        <h1
+          style={{
+            fontFamily: "'Caveat',cursive",
+            fontSize: 58,
+            color: NAVY,
+            marginBottom: 8,
+          }}
+        >
+          write something 💌
+        </h1>
+        <p
+          style={{
+            fontFamily: "'Patrick Hand',cursive",
+            color: NAVY + "88",
+            marginBottom: 36,
+          }}
+        >
           Leave a memory, note, confession, or message for {CONFIG.ownerName}.
         </p>
 
         <div style={{ marginBottom: 24 }}>
-          <label style={{ display: "flex", gap: 12, alignItems: "center", fontFamily: "'Patrick Hand',cursive", fontSize: 17, cursor: "pointer" }}>
-            <input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}
-              style={{ width: 20, height: 20, accentColor: RED }} />
+          <label
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              fontFamily: "'Patrick Hand',cursive",
+              fontSize: 17,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={anonymous}
+              onChange={(e) => setAnonymous(e.target.checked)}
+              style={{ width: 20, height: 20, accentColor: RED }}
+            />
             Stay anonymous
           </label>
         </div>
 
         {!anonymous && (
           <FieldWrapper label="Your name" id="name">
-            <input className="hand-input" placeholder="e.g. Priya"
-              value={name} onChange={e => setName(e.target.value)} aria-label="Your name" />
+            <input
+              className="hand-input"
+              placeholder="e.g. Priya"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              aria-label="Your name"
+            />
           </FieldWrapper>
         )}
 
-        <FieldWrapper label="A memory to share *" id="memory" err={errors.memory}>
-          <textarea className="hand-textarea" rows={4} placeholder="That one time we..."
-            value={memory} onChange={e => { setMemory(e.target.value); setErrors({}); }}
-            aria-required="true" />
+        <FieldWrapper
+          label="A memory to share *"
+          id="memory"
+          err={errors.memory}
+        >
+          <textarea
+            className="hand-textarea"
+            rows={4}
+            placeholder="That one time we…"
+            value={memory}
+            onChange={(e) => {
+              setMemory(e.target.value);
+              setErrors({});
+            }}
+            aria-required="true"
+          />
         </FieldWrapper>
 
         <FieldWrapper label="A heartfelt message" id="message">
-          <textarea className="hand-textarea" rows={4} placeholder="I want you to know..."
-            value={message} onChange={e => setMessage(e.target.value)} />
+          <textarea
+            className="hand-textarea"
+            rows={4}
+            placeholder="I want you to know…"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
         </FieldWrapper>
 
         <FieldWrapper label="Anything else?" id="note">
-          <textarea className="hand-textarea" rows={3} placeholder="P.S. …"
-            value={note} onChange={e => setNote(e.target.value)} />
+          <textarea
+            className="hand-textarea"
+            rows={3}
+            placeholder="P.S. …"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
         </FieldWrapper>
 
-        <div className="upload-zone" style={{ marginBottom: 28 }}
+        <div
+          className="upload-zone"
+          style={{ marginBottom: 28 }}
           onClick={() => fileRef.current.click()}
-          onKeyDown={e => e.key === "Enter" && fileRef.current.click()}
-          tabIndex={0} role="button" aria-label="Upload files">
-          <p style={{ fontFamily: "'Patrick Hand',cursive", fontSize: 18, color: NAVY + "bb" }}>
+          onKeyDown={(e) => e.key === "Enter" && fileRef.current.click()}
+          tabIndex={0}
+          role="button"
+          aria-label="Upload files"
+        >
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              fontSize: 18,
+              color: NAVY + "bb",
+            }}
+          >
             📎 Attach files (filenames saved to memory)
           </p>
-          <p style={{ fontFamily: "'Patrick Hand',cursive", fontSize: 13, color: NAVY + "66", marginTop: 6 }}>
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              fontSize: 13,
+              color: NAVY + "66",
+              marginTop: 6,
+            }}
+          >
             Click or press Enter to browse
           </p>
-          <input hidden multiple type="file" ref={fileRef}
-            onChange={e => handleFiles(e.target.files)} accept="image/*,video/*,audio/*" />
+          <input
+            hidden
+            multiple
+            type="file"
+            ref={fileRef}
+            onChange={(e) => handleFiles(e.target.files)}
+            accept="image/*,video/*,audio/*"
+          />
         </div>
 
         {mediaPreviews.length > 0 && (
-          <div style={{ marginBottom: 16, fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", fontSize: 14 }}>
-            {mediaPreviews.map((p, i) => <div key={i}>📎 {p.name}</div>)}
+          <div
+            style={{
+              marginBottom: 16,
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              fontSize: 14,
+            }}
+          >
+            {mediaPreviews.map((p, i) => (
+              <div key={i}>📎 {p.name}</div>
+            ))}
           </div>
         )}
 
@@ -600,32 +867,94 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
 function MemoryCard({ e }) {
   return (
     <div style={{ breakInside: "avoid", marginBottom: 24 }}>
-      <article className="polaroid" style={{ background: e.color, transform: `rotate(${e.rot}deg)` }}
-        aria-label={`Memory from ${e.name}`}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <span style={{ fontFamily: "'Patrick Hand',cursive", fontSize: 14, fontWeight: 600, color: NAVY }}>{e.name}</span>
+      <article
+        className="polaroid"
+        style={{ background: e.color, transform: `rotate(${e.rot}deg)` }}
+        aria-label={`Memory from ${e.name}`}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 10,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              fontSize: 14,
+              fontWeight: 600,
+              color: NAVY,
+            }}
+          >
+            {e.name}
+          </span>
           <span className="badge badge-wall">📸 wall</span>
         </div>
-        <div style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }} aria-hidden="true">{e.emoji}</div>
-        <p style={{ fontFamily: "'Caveat',cursive", fontSize: 22, lineHeight: 1.55, color: NAVY, marginBottom: 10 }}>
+        <div
+          style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }}
+          aria-hidden="true"
+        >
+          {e.emoji}
+        </div>
+        <p
+          style={{
+            fontFamily: "'Caveat',cursive",
+            fontSize: 22,
+            lineHeight: 1.55,
+            color: NAVY,
+            marginBottom: 10,
+          }}
+        >
           "{e.memory}"
         </p>
         {e.message && (
-          <p style={{ fontStyle: "italic", color: NAVY + "bb", marginBottom: 10, lineHeight: 1.6, fontFamily: "'Patrick Hand',cursive" }}>
+          <p
+            style={{
+              fontStyle: "italic",
+              color: NAVY + "bb",
+              marginBottom: 10,
+              lineHeight: 1.6,
+              fontFamily: "'Patrick Hand',cursive",
+            }}
+          >
             {e.message}
           </p>
         )}
         {e.note && (
-          <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginBottom: 8, fontSize: 14 }}>
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              marginBottom: 8,
+              fontSize: 14,
+            }}
+          >
             {e.note}
           </p>
         )}
         {e.mediaPreviews?.length > 0 && (
-          <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "66", fontSize: 13, marginBottom: 8 }}>
-            📎 {e.mediaPreviews.map(p => p.name).join(", ")}
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "66",
+              fontSize: 13,
+              marginBottom: 8,
+            }}
+          >
+            📎 {e.mediaPreviews.map((p) => p.name).join(", ")}
           </p>
         )}
-        <p style={{ textAlign: "right", marginTop: 10, fontSize: 12, color: NAVY + "55", fontFamily: "'Patrick Hand',cursive" }}>
+        <p
+          style={{
+            textAlign: "right",
+            marginTop: 10,
+            fontSize: 12,
+            color: NAVY + "55",
+            fontFamily: "'Patrick Hand',cursive",
+          }}
+        >
           <time dateTime={e.date}>{fmtDate(e.date)}</time>
         </p>
       </article>
@@ -637,24 +966,29 @@ function GalleryPage({ entries, setEntries, showToast }) {
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(false);
 
-  const syncFromBin = useCallback(async () => {
-    if (!isConfigured()) { showToast("⚠️ Configure JSONBin first!"); return; }
+  const syncFromFirestore = useCallback(async () => {
+    if (!isConfigured()) {
+      showToast("⚠️ Configure Firebase first!");
+      return;
+    }
     setLoading(true);
     try {
-      const loaded = await loadEntriesFromBin();
+      const loaded = await loadEntriesFromFirestore();
       setEntries(loaded);
       showToast(`Loaded ${loaded.length} memories ☁️`);
     } catch (err) {
       console.error(err);
-      showToast("❌ Couldn't load from JSONBin.");
+      showToast("❌ Couldn't load from Firestore.");
     } finally {
       setLoading(false);
     }
   }, [setEntries, showToast]);
 
-  useEffect(() => { syncFromBin(); }, []);
+  useEffect(() => {
+    syncFromFirestore();
+  }, []);
 
-  const shown = entries.filter(e => {
+  const shown = entries.filter((e) => {
     if (filter === "all") return true;
     if (filter === "anon") return e.visibility === "anonymous";
     return true;
@@ -662,20 +996,51 @@ function GalleryPage({ entries, setEntries, showToast }) {
 
   return (
     <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
-      <main id="main-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}>
+      <main
+        id="main-content"
+        style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}
+      >
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 56, color: NAVY }}>memory wall 📸</h1>
+          <h1
+            style={{
+              fontFamily: "'Caveat',cursive",
+              fontSize: 56,
+              color: NAVY,
+            }}
+          >
+            memory wall 📸
+          </h1>
           <div style={{ marginTop: 14 }}>
-            <button className="btn-ghost" onClick={syncFromBin} disabled={loading}
-              style={{ fontSize: 16, padding: "10px 22px" }}>
+            <button
+              className="btn-ghost"
+              onClick={syncFromFirestore}
+              disabled={loading}
+              style={{ fontSize: 16, padding: "10px 22px" }}
+            >
               {loading ? "Loading… ⏳" : "☁️ Refresh memories"}
             </button>
           </div>
-          <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 20 }}
-            role="group" aria-label="Filter memories">
-            {[["all", "all"], ["anon", "anonymous"]].map(([f, lbl]) => (
-              <button key={f} className={`filter-pill${filter === f ? " active" : ""}`}
-                onClick={() => setFilter(f)} aria-pressed={filter === f}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              marginTop: 20,
+            }}
+            role="group"
+            aria-label="Filter memories"
+          >
+            {[
+              ["all", "all"],
+              ["anon", "anonymous"],
+            ].map(([f, lbl]) => (
+              <button
+                key={f}
+                className={`filter-pill${filter === f ? " active" : ""}`}
+                onClick={() => setFilter(f)}
+                aria-pressed={filter === f}
+              >
                 {lbl}
               </button>
             ))}
@@ -683,16 +1048,34 @@ function GalleryPage({ entries, setEntries, showToast }) {
         </div>
 
         {loading ? (
-          <p style={{ textAlign: "center", fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginTop: 60, fontSize: 20 }}>
+          <p
+            style={{
+              textAlign: "center",
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              marginTop: 60,
+              fontSize: 20,
+            }}
+          >
             Loading memories… ✨
           </p>
         ) : shown.length === 0 ? (
-          <p style={{ textAlign: "center", fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginTop: 60, fontSize: 20 }}>
+          <p
+            style={{
+              textAlign: "center",
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              marginTop: 60,
+              fontSize: 20,
+            }}
+          >
             No memories here yet.
           </p>
         ) : (
           <div style={{ columns: "3 260px", columnGap: 22 }}>
-            {shown.map(e => <MemoryCard key={e.id} e={e} />)}
+            {shown.map((e) => (
+              <MemoryCard key={e.id || e._docId} e={e} />
+            ))}
           </div>
         )}
       </main>
@@ -702,35 +1085,118 @@ function GalleryPage({ entries, setEntries, showToast }) {
 
 // ─── Timeline ─────────────────────────────────────────────────────────────────
 function TimelinePage({ entries }) {
-  const sorted = [...entries].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const sorted = [...entries].sort(
+    (a, b) => new Date(a.date) - new Date(b.date),
+  );
   return (
     <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
-      <main id="main-content" style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px" }}>
-        <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 56, color: NAVY, textAlign: "center", marginBottom: 50 }}>
+      <main
+        id="main-content"
+        style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px" }}
+      >
+        <h1
+          style={{
+            fontFamily: "'Caveat',cursive",
+            fontSize: 56,
+            color: NAVY,
+            textAlign: "center",
+            marginBottom: 50,
+          }}
+        >
           timeline 🕰
         </h1>
-        <ol style={{ listStyle: "none", position: "relative", paddingLeft: 32 }}>
-          <div style={{ position: "absolute", left: 14, top: 0, bottom: 0, width: 2, background: NAVY + "18", borderRadius: 2 }} aria-hidden="true" />
+        <ol
+          style={{ listStyle: "none", position: "relative", paddingLeft: 32 }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: 14,
+              top: 0,
+              bottom: 0,
+              width: 2,
+              background: NAVY + "18",
+              borderRadius: 2,
+            }}
+            aria-hidden="true"
+          />
           {sorted.length === 0 && (
-            <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", fontSize: 18 }}>No memories yet.</p>
+            <p
+              style={{
+                fontFamily: "'Patrick Hand',cursive",
+                color: NAVY + "88",
+                fontSize: 18,
+              }}
+            >
+              No memories yet.
+            </p>
           )}
           {sorted.map((e) => (
-            <li key={e.id} style={{ position: "relative", marginBottom: 28 }}>
-              <div style={{
-                position: "absolute", left: -26, top: 20,
-                width: 14, height: 14, borderRadius: "50%",
-                background: RED, border: `2px solid ${CREAM}`,
-              }} aria-hidden="true" />
-              <article style={{
-                background: "white", borderRadius: 18, padding: "20px 24px",
-                boxShadow: "0 3px 16px rgba(0,0,0,.07)",
-                borderLeft: `4px solid ${RED}`,
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-                  <span style={{ fontFamily: "'Patrick Hand',cursive", fontWeight: 600, color: NAVY }}>{e.name}</span>
-                  <time dateTime={e.date} style={{ fontSize: 13, color: RED, fontFamily: "'Patrick Hand',cursive" }}>{fmtDate(e.date)}</time>
+            <li
+              key={e.id || e._docId}
+              style={{ position: "relative", marginBottom: 28 }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  left: -26,
+                  top: 20,
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: RED,
+                  border: `2px solid ${CREAM}`,
+                }}
+                aria-hidden="true"
+              />
+              <article
+                style={{
+                  background: "white",
+                  borderRadius: 18,
+                  padding: "20px 24px",
+                  boxShadow: "0 3px 16px rgba(0,0,0,.07)",
+                  borderLeft: `4px solid ${RED}`,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 10,
+                    flexWrap: "wrap",
+                    gap: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "'Patrick Hand',cursive",
+                      fontWeight: 600,
+                      color: NAVY,
+                    }}
+                  >
+                    {e.name}
+                  </span>
+                  <time
+                    dateTime={e.date}
+                    style={{
+                      fontSize: 13,
+                      color: RED,
+                      fontFamily: "'Patrick Hand',cursive",
+                    }}
+                  >
+                    {fmtDate(e.date)}
+                  </time>
                 </div>
-                <p style={{ fontFamily: "'Caveat',cursive", fontSize: 23, lineHeight: 1.6, color: NAVY }}>{e.memory}</p>
+                <p
+                  style={{
+                    fontFamily: "'Caveat',cursive",
+                    fontSize: 23,
+                    lineHeight: 1.6,
+                    color: NAVY,
+                  }}
+                >
+                  {e.memory}
+                </p>
               </article>
             </li>
           ))}
@@ -743,7 +1209,9 @@ function TimelinePage({ entries }) {
 // ─── Settings ─────────────────────────────────────────────────────────────────
 function SettingsPage({ entries, showToast }) {
   const handleExportJSON = () => {
-    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(entries, null, 2)], {
+      type: "application/json",
+    });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "slam-book-export.json";
@@ -752,45 +1220,170 @@ function SettingsPage({ entries, showToast }) {
   };
 
   const Row = ({ label, value, status }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: `1px solid ${NAVY}11` }}>
-      <span style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY, fontSize: 16 }}>{label}</span>
-      <span style={{ fontFamily: "'Patrick Hand',cursive", color: status ? "#10B981" : "#EF4444", fontSize: 14 }}>
-        {status ? "✅ " : "⚠️ "}{value}
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "14px 0",
+        borderBottom: `1px solid ${NAVY}11`,
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "'Patrick Hand',cursive",
+          color: NAVY,
+          fontSize: 16,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontFamily: "'Patrick Hand',cursive",
+          color: status ? "#10B981" : "#EF4444",
+          fontSize: 14,
+        }}
+      >
+        {status ? "✅ " : "⚠️ "}
+        {value}
       </span>
     </div>
   );
 
   return (
     <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
-      <main id="main-content" style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}>
-        <h1 style={{ fontFamily: "'Caveat',cursive", fontSize: 52, color: NAVY, marginBottom: 8 }}>settings ⚙️</h1>
-        <p style={{ fontFamily: "'Patrick Hand',cursive", color: NAVY + "88", marginBottom: 36 }}>
-          Edit the <code>CONFIG</code> block at the top of <code>SlamBook.jsx</code> to change these.
+      <main
+        id="main-content"
+        style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}
+      >
+        <h1
+          style={{
+            fontFamily: "'Caveat',cursive",
+            fontSize: 52,
+            color: NAVY,
+            marginBottom: 8,
+          }}
+        >
+          settings ⚙️
+        </h1>
+        <p
+          style={{
+            fontFamily: "'Patrick Hand',cursive",
+            color: NAVY + "88",
+            marginBottom: 36,
+          }}
+        >
+          Edit the <code>CONFIG</code> block at the top of{" "}
+          <code>SlamBook.jsx</code> to change these.
         </p>
-        <section style={{ background: "white", borderRadius: 18, padding: "24px 28px", boxShadow: "0 3px 16px rgba(0,0,0,.07)", marginBottom: 28 }}>
-          <h2 style={{ fontFamily: "'Caveat',cursive", fontSize: 28, color: NAVY, marginBottom: 4 }}>Status</h2>
+        <section
+          style={{
+            background: "white",
+            borderRadius: 18,
+            padding: "24px 28px",
+            boxShadow: "0 3px 16px rgba(0,0,0,.07)",
+            marginBottom: 28,
+          }}
+        >
+          <h2
+            style={{
+              fontFamily: "'Caveat',cursive",
+              fontSize: 28,
+              color: NAVY,
+              marginBottom: 4,
+            }}
+          >
+            Status
+          </h2>
           <Row label="Owner name" value={CONFIG.ownerName} status={true} />
-          <Row label="JSONBin" value={isConfigured() ? "Connected ✓" : "Not configured"} status={isConfigured()} />
-          <Row label="EmailJS" value={isEmailConfigured() ? "Connected ✓" : "Not configured"} status={isEmailConfigured()} />
-          <Row label="Memories stored" value={`${entries.length} entries`} status={true} />
+          <Row
+            label="Firebase"
+            value={isConfigured() ? "Connected ✓" : "Not configured"}
+            status={isConfigured()}
+          />
+          <Row
+            label="EmailJS"
+            value={isEmailConfigured() ? "Connected ✓" : "Not configured"}
+            status={isEmailConfigured()}
+          />
+          <Row
+            label="Memories stored"
+            value={`${entries.length} entries`}
+            status={true}
+          />
         </section>
-        <section style={{ background: "white", borderRadius: 18, padding: "24px 28px", boxShadow: "0 3px 16px rgba(0,0,0,.07)", marginBottom: 28 }}>
-          <h2 style={{ fontFamily: "'Caveat',cursive", fontSize: 28, color: NAVY, marginBottom: 16 }}>Actions</h2>
-          <button className="btn-ghost" onClick={handleExportJSON} style={{ justifyContent: "flex-start", gap: 12 }}>
+        <section
+          style={{
+            background: "white",
+            borderRadius: 18,
+            padding: "24px 28px",
+            boxShadow: "0 3px 16px rgba(0,0,0,.07)",
+            marginBottom: 28,
+          }}
+        >
+          <h2
+            style={{
+              fontFamily: "'Caveat',cursive",
+              fontSize: 28,
+              color: NAVY,
+              marginBottom: 16,
+            }}
+          >
+            Actions
+          </h2>
+          <button
+            className="btn-ghost"
+            onClick={handleExportJSON}
+            style={{ justifyContent: "flex-start", gap: 12 }}
+          >
             📥 Export all memories as JSON
           </button>
         </section>
-        <div style={{ background: "#EEF9F4", border: "1px solid #A7F3D0", borderRadius: 14, padding: "18px 22px", marginBottom: 16 }}>
-          <p style={{ fontFamily: "'Patrick Hand',cursive", color: "#065F46", fontSize: 15, lineHeight: 1.7 }}>
-            ☁️ <strong>JSONBin.io</strong> stores all memories as a single JSON array in the cloud.
-            Free tier: <strong>10,000 requests/month</strong>. Your <code>apiKey</code> is in the CONFIG —
-            keep it private and don't share your code publicly with it included.
+        <div
+          style={{
+            background: "#EEF9F4",
+            border: "1px solid #A7F3D0",
+            borderRadius: 14,
+            padding: "18px 22px",
+            marginBottom: 16,
+          }}
+        >
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              color: "#065F46",
+              fontSize: 15,
+              lineHeight: 1.7,
+            }}
+          >
+            🔥 <strong>Firebase Firestore</strong> stores each memory as a
+            document in a<code> memories</code> collection. Free tier:{" "}
+            <strong>50,000 reads &amp; 20,000 writes/day</strong>. Never
+            expires. Keep your <code>apiKey</code> private — use Firebase
+            security rules to restrict write access if you deploy publicly.
           </p>
         </div>
-        <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 14, padding: "18px 22px" }}>
-          <p style={{ fontFamily: "'Patrick Hand',cursive", color: "#1E40AF", fontSize: 15, lineHeight: 1.7 }}>
-            📧 <strong>EmailJS.com</strong> sends you an email every time someone saves a memory.
-            Free tier: <strong>200 emails/month</strong>. See the CONFIG comment at the top of the file for setup instructions.
+        <div
+          style={{
+            background: "#EFF6FF",
+            border: "1px solid #BFDBFE",
+            borderRadius: 14,
+            padding: "18px 22px",
+          }}
+        >
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              color: "#1E40AF",
+              fontSize: 15,
+              lineHeight: 1.7,
+            }}
+          >
+            📧 <strong>EmailJS.com</strong> sends you an email every time
+            someone saves a memory. Free tier: <strong>200 emails/month</strong>
+            . See the CONFIG comment at the top of the file for setup
+            instructions.
           </p>
         </div>
       </main>
@@ -809,15 +1402,44 @@ export default function SlamBook() {
   return (
     <>
       <style>{CSS}</style>
-      <a href="#main-content" className="skip-link">Skip to content</a>
-      <div style={{ fontFamily: "'Nunito',sans-serif", minHeight: "100vh", background: CREAM }}>
-        <Nav page={page} setPage={(p) => { setPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
+      <div
+        style={{
+          fontFamily: "'Nunito',sans-serif",
+          minHeight: "100vh",
+          background: CREAM,
+        }}
+      >
+        <Nav
+          page={page}
+          setPage={(p) => {
+            setPage(p);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
 
         {page === "home" && <HomePage setPage={setPage} entries={entries} />}
-        {page === "write" && <WritePage entries={entries} setEntries={setEntries} setPage={setPage} showToast={showToast} />}
-        {page === "gallery" && <GalleryPage entries={entries} setEntries={setEntries} showToast={showToast} />}
+        {page === "write" && (
+          <WritePage
+            entries={entries}
+            setEntries={setEntries}
+            setPage={setPage}
+            showToast={showToast}
+          />
+        )}
+        {page === "gallery" && (
+          <GalleryPage
+            entries={entries}
+            setEntries={setEntries}
+            showToast={showToast}
+          />
+        )}
         {page === "timeline" && <TimelinePage entries={entries} />}
-        {page === "settings" && <SettingsPage entries={entries} showToast={showToast} />}
+        {page === "settings" && (
+          <SettingsPage entries={entries} showToast={showToast} />
+        )}
 
         {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
       </div>
