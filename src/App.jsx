@@ -412,7 +412,7 @@ const NAV_ITEMS = [
   ["home", "🏠", "home"],
   ["write", "✏️", "write"],
   // ["gallery", "📸", "wall"],
-  ["timeline", "🕰", "timeline"],
+  // ["timeline", "🕰", "timeline"],
 ];
 
 function Nav({ page, setPage }) {
@@ -1083,127 +1083,127 @@ function GalleryPage({ entries, setEntries, showToast }) {
 }
 
 // // ─── Timeline ─────────────────────────────────────────────────────────────────
-// function TimelinePage({ entries }) {
-//   const sorted = [...entries].sort(
-//     (a, b) => new Date(a.date) - new Date(b.date),
-//   );
-//   return (
-//     <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
-//       <main
-//         id="main-content"
-//         style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px" }}
-//       >
-//         <h1
-//           style={{
-//             fontFamily: "'Caveat',cursive",
-//             fontSize: 56,
-//             color: NAVY,
-//             textAlign: "center",
-//             marginBottom: 50,
-//           }}
-//         >
-//           timeline 🕰
-//         </h1>
-//         <ol
-//           style={{ listStyle: "none", position: "relative", paddingLeft: 32 }}
-//         >
-//           <div
-//             style={{
-//               position: "absolute",
-//               left: 14,
-//               top: 0,
-//               bottom: 0,
-//               width: 2,
-//               background: NAVY + "18",
-//               borderRadius: 2,
-//             }}
-//             aria-hidden="true"
-//           />
-//           {sorted.length === 0 && (
-//             <p
-//               style={{
-//                 fontFamily: "'Patrick Hand',cursive",
-//                 color: NAVY + "88",
-//                 fontSize: 18,
-//               }}
-//             >
-//               No memories yet.
-//             </p>
-//           )}
-//           {sorted.map((e) => (
-//             <li
-//               key={e.id || e._docId}
-//               style={{ position: "relative", marginBottom: 28 }}
-//             >
-//               <div
-//                 style={{
-//                   position: "absolute",
-//                   left: -26,
-//                   top: 20,
-//                   width: 14,
-//                   height: 14,
-//                   borderRadius: "50%",
-//                   background: RED,
-//                   border: `2px solid ${CREAM}`,
-//                 }}
-//                 aria-hidden="true"
-//               />
-//               <article
-//                 style={{
-//                   background: "white",
-//                   borderRadius: 18,
-//                   padding: "20px 24px",
-//                   boxShadow: "0 3px 16px rgba(0,0,0,.07)",
-//                   borderLeft: `4px solid ${RED}`,
-//                 }}
-//               >
-//                 <div
-//                   style={{
-//                     display: "flex",
-//                     justifyContent: "space-between",
-//                     marginBottom: 10,
-//                     flexWrap: "wrap",
-//                     gap: 8,
-//                   }}
-//                 >
-//                   <span
-//                     style={{
-//                       fontFamily: "'Patrick Hand',cursive",
-//                       fontWeight: 600,
-//                       color: NAVY,
-//                     }}
-//                   >
-//                     {e.name}
-//                   </span>
-//                   <time
-//                     dateTime={e.date}
-//                     style={{
-//                       fontSize: 13,
-//                       color: RED,
-//                       fontFamily: "'Patrick Hand',cursive",
-//                     }}
-//                   >
-//                     {fmtDate(e.date)}
-//                   </time>
-//                 </div>
-//                 <p
-//                   style={{
-//                     fontFamily: "'Caveat',cursive",
-//                     fontSize: 23,
-//                     lineHeight: 1.6,
-//                     color: NAVY,
-//                   }}
-//                 >
-//                   {e.memory}
-//                 </p>
-//               </article>
-//             </li>
-//           ))}
-//         </ol>
-//       </main>
-//     </div>
-//   );
-// }
+function TimelinePage({ entries }) {
+  const sorted = [...entries].sort(
+    (a, b) => new Date(a.date) - new Date(b.date),
+  );
+  return (
+    <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
+      <main
+        id="main-content"
+        style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px" }}
+      >
+        <h1
+          style={{
+            fontFamily: "'Caveat',cursive",
+            fontSize: 56,
+            color: NAVY,
+            textAlign: "center",
+            marginBottom: 50,
+          }}
+        >
+          timeline 🕰
+        </h1>
+        <ol
+          style={{ listStyle: "none", position: "relative", paddingLeft: 32 }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: 14,
+              top: 0,
+              bottom: 0,
+              width: 2,
+              background: NAVY + "18",
+              borderRadius: 2,
+            }}
+            aria-hidden="true"
+          />
+          {sorted.length === 0 && (
+            <p
+              style={{
+                fontFamily: "'Patrick Hand',cursive",
+                color: NAVY + "88",
+                fontSize: 18,
+              }}
+            >
+              No memories yet.
+            </p>
+          )}
+          {sorted.map((e) => (
+            <li
+              key={e.id || e._docId}
+              style={{ position: "relative", marginBottom: 28 }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  left: -26,
+                  top: 20,
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: RED,
+                  border: `2px solid ${CREAM}`,
+                }}
+                aria-hidden="true"
+              />
+              <article
+                style={{
+                  background: "white",
+                  borderRadius: 18,
+                  padding: "20px 24px",
+                  boxShadow: "0 3px 16px rgba(0,0,0,.07)",
+                  borderLeft: `4px solid ${RED}`,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 10,
+                    flexWrap: "wrap",
+                    gap: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "'Patrick Hand',cursive",
+                      fontWeight: 600,
+                      color: NAVY,
+                    }}
+                  >
+                    {e.name}
+                  </span>
+                  <time
+                    dateTime={e.date}
+                    style={{
+                      fontSize: 13,
+                      color: RED,
+                      fontFamily: "'Patrick Hand',cursive",
+                    }}
+                  >
+                    {fmtDate(e.date)}
+                  </time>
+                </div>
+                <p
+                  style={{
+                    fontFamily: "'Caveat',cursive",
+                    fontSize: 23,
+                    lineHeight: 1.6,
+                    color: NAVY,
+                  }}
+                >
+                  {e.memory}
+                </p>
+              </article>
+            </li>
+          ))}
+        </ol>
+      </main>
+    </div>
+  );
+}
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 function SettingsPage({ entries, showToast }) {
