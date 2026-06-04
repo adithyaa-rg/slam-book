@@ -411,7 +411,7 @@ function ConfigWarn() {
 const NAV_ITEMS = [
   ["home", "🏠", "home"],
   ["write", "✏️", "write"],
-  ["gallery", "📸", "wall"],
+  // ["gallery", "📸", "wall"],
   ["timeline", "🕰", "timeline"],
 ];
 
