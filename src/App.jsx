@@ -890,7 +890,7 @@ function MemoryCard({ e }) {
           >
             {e.name}
           </span>
-          <span className="badge badge-wall">📸 wall</span>
+          {/* <span className="badge badge-wall">📸 wall</span>*/}
         </div>
         <div
           style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }}
