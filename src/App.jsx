@@ -579,9 +579,9 @@ function HomePage({ setPage, entries }) {
           <button className="btn-cta" onClick={() => setPage("write")}>
             💌 Write Something
           </button>
-          <button className="btn-ghost" onClick={() => setPage("gallery")}>
+          {/* <button className="btn-ghost" onClick={() => setPage("gallery")}>
             📸 Open Memory Wall
-          </button>
+          </button>*/}
         </div>
         <div
           style={{
@@ -890,7 +890,6 @@ function MemoryCard({ e }) {
           >
             {e.name}
           </span>
-          {/* <span className="badge badge-wall">📸 wall</span>*/}
         </div>
         <div
           style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }}
