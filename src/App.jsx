@@ -939,44 +939,6 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
           />
         </FieldWrapper>
 
-        <div
-          className="upload-zone"
-          style={{ marginBottom: 28 }}
-          onClick={() => fileRef.current.click()}
-          onKeyDown={(e) => e.key === "Enter" && fileRef.current.click()}
-          tabIndex={0}
-          role="button"
-          aria-label="Upload files"
-        >
-          <p
-            style={{
-              fontFamily: "'Patrick Hand',cursive",
-              fontSize: 18,
-              color: NAVY + "bb",
-            }}
-          >
-            📎 Attach files (filenames saved to memory)
-          </p>
-          <p
-            style={{
-              fontFamily: "'Patrick Hand',cursive",
-              fontSize: 13,
-              color: NAVY + "66",
-              marginTop: 6,
-            }}
-          >
-            Click or press Enter to browse
-          </p>
-          <input
-            hidden
-            multiple
-            type="file"
-            ref={fileRef}
-            onChange={(e) => handleFiles(e.target.files)}
-            accept="image/*,video/*,audio/*"
-          />
-        </div>
-
         {/* {mediaPreviews.length > 0 && (
           <div
             style={{
