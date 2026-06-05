@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import {
   getFirestore,
   collection,
@@ -71,15 +72,36 @@ const CONFIG = {
 
 let _app = null;
 let _db = null;
+let _storage = null;
 
+function getStorageInstance() {
+  if (_storage) return _storage;
+
+  if (!_app) {
+    _app = initializeApp(CONFIG.firebase);
+  }
+
+  _storage = getStorage(_app);
+  return _storage;
+}
+// function getDB() {
+//   if (_db) return _db;
+//   if (!isConfigured()) throw new Error("Firebase not configured.");
+//   _app = initializeApp(CONFIG.firebase);
+//   _db = getFirestore(_app);
+//   return _db;
+// }
 function getDB() {
   if (_db) return _db;
   if (!isConfigured()) throw new Error("Firebase not configured.");
-  _app = initializeApp(CONFIG.firebase);
+
+  if (!_app) {
+    _app = initializeApp(CONFIG.firebase);
+  }
+
   _db = getFirestore(_app);
   return _db;
 }
-
 const COLLECTION = "memories";
 
 async function loadEntriesFromFirestore() {
@@ -624,7 +646,32 @@ function FieldWrapper({ label, id, err, children }) {
     </div>
   );
 }
+async function uploadMedia(files) {
+  const storage = getStorageInstance();
 
+  return Promise.all(
+    files.map(async (item) => {
+      const filename =
+        Date.now() +
+        "_" +
+        Math.random().toString(36).slice(2) +
+        "_" +
+        item.name;
+
+      const storageRef = ref(storage, `memories/${filename}`);
+
+      await uploadBytes(storageRef, item.file);
+
+      const downloadURL = await getDownloadURL(storageRef);
+
+      return {
+        name: item.name,
+        type: item.type,
+        url: downloadURL,
+      };
+    }),
+  );
+}
 function WritePage({ entries, setEntries, setPage, showToast }) {
   const [name, setName] = useState("");
   const [anonymous, setAnonymous] = useState(false);
@@ -637,7 +684,13 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
   const fileRef = useRef();
 
   const handleFiles = (fileList) => {
+    // const previews = Array.from(fileList).map((f) => ({
+    //   name: f.name,
+    //   type: f.type.startsWith("image/") ? "image" : "other",
+    //   url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+    // }));
     const previews = Array.from(fileList).map((f) => ({
+      file: f,
       name: f.name,
       type: f.type.startsWith("image/") ? "image" : "other",
       url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
@@ -657,27 +710,50 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
     setErrors({});
     setSaving(true);
 
-    const entry = {
-      id: Date.now(),
-      name: anonymous ? "Anonymous" : name || "Someone",
-      visibility: anonymous ? "anonymous" : "named",
-      type: "wall",
-      memory,
-      message,
-      note,
-      // We only store file names — actual files aren't uploaded to keep setup simple
-      mediaPreviews: mediaPreviews.map((p) => ({
-        name: p.name,
-        type: p.type,
-        url: null,
-      })),
-      emoji: rnd(EMOJIS),
-      color: rnd(PALETTE),
-      rot: Math.random() * 6 - 3,
-      date: new Date().toISOString(),
-    };
+    // const entry = {
+    //   id: Date.now(),
+    //   name: anonymous ? "Anonymous" : name || "Someone",
+    //   visibility: anonymous ? "anonymous" : "named",
+    //   type: "wall",
+    //   memory,
+    //   message,
+    //   note,
+    //   // We only store file names — actual files aren't uploaded to keep setup simple
+    //   mediaPreviews: mediaPreviews.map((p) => ({
+    //     name: p.name,
+    //     type: p.type,
+    //     url: null,
+    //   })),
+    //   emoji: rnd(EMOJIS),
+    //   color: rnd(PALETTE),
+    //   rot: Math.random() * 6 - 3,
+    //   date: new Date().toISOString(),
+    // };
 
     try {
+      const uploadedMedia =
+        mediaPreviews.length > 0 ? await uploadMedia(mediaPreviews) : [];
+      const entry = {
+        id: Date.now(),
+        name: anonymous ? "Anonymous" : name || "Someone",
+        visibility: anonymous ? "anonymous" : "named",
+        type: "wall",
+        memory,
+        message,
+        note,
+        // We only store file names — actual files aren't uploaded to keep setup simple
+        // mediaPreviews: mediaPreviews.map((p) => ({
+        //   name: p.name,
+        //   type: p.type,
+        //   url: null,
+        // })),
+        //
+        mediaPreviews: uploadedMedia,
+        emoji: rnd(EMOJIS),
+        color: rnd(PALETTE),
+        rot: Math.random() * 6 - 3,
+        date: new Date().toISOString(),
+      };
       // 1️⃣ Save to Firestore
       const saved = await saveEntryToFirestore(entry);
       setEntries((prev) => [saved, ...prev]);
@@ -695,8 +771,13 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
           console.error("Email notification failed:", err);
           showToast("Memory saved ✨ (email failed — check EmailJS config)");
         });
-
-      setPage("gallery");
+      setName("");
+      setAnonymous(false);
+      setMemory("");
+      setMessage("");
+      setNote("");
+      setMediaPreviews([]);
+      setPage("home");
     } catch (err) {
       console.error("Firestore save failed:", err);
       showToast("❌ Save failed — check your Firebase config.");
@@ -864,225 +945,255 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
 }
 
 // ─── Gallery ──────────────────────────────────────────────────────────────────
-// function MemoryCard({ e }) {
-//   return (
-//     <div style={{ breakInside: "avoid", marginBottom: 24 }}>
-//       <article
-//         className="polaroid"
-//         style={{ background: e.color, transform: `rotate(${e.rot}deg)` }}
-//         aria-label={`Memory from ${e.name}`}
-//       >
-//         <div
-//           style={{
-//             display: "flex",
-//             justifyContent: "space-between",
-//             alignItems: "center",
-//             marginBottom: 10,
-//           }}
-//         >
-//           <span
-//             style={{
-//               fontFamily: "'Patrick Hand',cursive",
-//               fontSize: 14,
-//               fontWeight: 600,
-//               color: NAVY,
-//             }}
-//           >
-//             {e.name}
-//           </span>
-//         </div>
-//         <div
-//           style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }}
-//           aria-hidden="true"
-//         >
-//           {e.emoji}
-//         </div>
-//         <p
-//           style={{
-//             fontFamily: "'Caveat',cursive",
-//             fontSize: 22,
-//             lineHeight: 1.55,
-//             color: NAVY,
-//             marginBottom: 10,
-//           }}
-//         >
-//           "{e.memory}"
-//         </p>
-//         {e.message && (
-//           <p
-//             style={{
-//               fontStyle: "italic",
-//               color: NAVY + "bb",
-//               marginBottom: 10,
-//               lineHeight: 1.6,
-//               fontFamily: "'Patrick Hand',cursive",
-//             }}
-//           >
-//             {e.message}
-//           </p>
-//         )}
-//         {e.note && (
-//           <p
-//             style={{
-//               fontFamily: "'Patrick Hand',cursive",
-//               color: NAVY + "88",
-//               marginBottom: 8,
-//               fontSize: 14,
-//             }}
-//           >
-//             {e.note}
-//           </p>
-//         )}
-//         {e.mediaPreviews?.length > 0 && (
-//           <p
-//             style={{
-//               fontFamily: "'Patrick Hand',cursive",
-//               color: NAVY + "66",
-//               fontSize: 13,
-//               marginBottom: 8,
-//             }}
-//           >
-//             📎 {e.mediaPreviews.map((p) => p.name).join(", ")}
-//           </p>
-//         )}
-//         <p
-//           style={{
-//             textAlign: "right",
-//             marginTop: 10,
-//             fontSize: 12,
-//             color: NAVY + "55",
-//             fontFamily: "'Patrick Hand',cursive",
-//           }}
-//         >
-//           <time dateTime={e.date}>{fmtDate(e.date)}</time>
-//         </p>
-//       </article>
-//     </div>
-//   );
-// }
+function MemoryCard({ e }) {
+  return (
+    <div style={{ breakInside: "avoid", marginBottom: 24 }}>
+      <article
+        className="polaroid"
+        style={{ background: e.color, transform: `rotate(${e.rot}deg)` }}
+        aria-label={`Memory from ${e.name}`}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 10,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              fontSize: 14,
+              fontWeight: 600,
+              color: NAVY,
+            }}
+          >
+            {e.name}
+          </span>
+        </div>
+        <div
+          style={{ fontSize: 36, textAlign: "center", margin: "10px 0 8px" }}
+          aria-hidden="true"
+        >
+          {e.emoji}
+        </div>
+        <p
+          style={{
+            fontFamily: "'Caveat',cursive",
+            fontSize: 22,
+            lineHeight: 1.55,
+            color: NAVY,
+            marginBottom: 10,
+          }}
+        >
+          "{e.memory}"
+        </p>
+        {e.message && (
+          <p
+            style={{
+              fontStyle: "italic",
+              color: NAVY + "bb",
+              marginBottom: 10,
+              lineHeight: 1.6,
+              fontFamily: "'Patrick Hand',cursive",
+            }}
+          >
+            {e.message}
+          </p>
+        )}
+        {e.note && (
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              marginBottom: 8,
+              fontSize: 14,
+            }}
+          >
+            {e.note}
+          </p>
+        )}
+        {/* {e.mediaPreviews?.length > 0 && (
+          <p
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "66",
+              fontSize: 13,
+              marginBottom: 8,
+            }}
+          >
+            📎 {e.mediaPreviews.map((p) => p.name).join(", ")}
+          </p>
+        )}*/}
+        {e.mediaPreviews?.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            {e.mediaPreviews.map((p, idx) =>
+              p.type === "image" ? (
+                <img
+                  key={idx}
+                  src={p.url}
+                  alt={p.name}
+                  style={{
+                    width: "100%",
+                    borderRadius: 8,
+                    marginBottom: 8,
+                  }}
+                />
+              ) : (
+                <div
+                  key={idx}
+                  style={{
+                    fontFamily: "'Patrick Hand',cursive",
+                    color: NAVY + "66",
+                    fontSize: 13,
+                    marginBottom: 4,
+                  }}
+                >
+                  📎 {p.name}
+                </div>
+              ),
+            )}
+          </div>
+        )}
+        <p
+          style={{
+            textAlign: "right",
+            marginTop: 10,
+            fontSize: 12,
+            color: NAVY + "55",
+            fontFamily: "'Patrick Hand',cursive",
+          }}
+        >
+          <time dateTime={e.date}>{fmtDate(e.date)}</time>
+        </p>
+      </article>
+    </div>
+  );
+}
 
-// function GalleryPage({ entries, setEntries, showToast }) {
-//   const [filter, setFilter] = useState("all");
-//   const [loading, setLoading] = useState(false);
+function GalleryPage({ entries, setEntries, showToast }) {
+  const [filter, setFilter] = useState("all");
+  const [loading, setLoading] = useState(false);
 
-//   const syncFromFirestore = useCallback(async () => {
-//     if (!isConfigured()) {
-//       showToast("⚠️ Configure Firebase first!");
-//       return;
-//     }
-//     setLoading(true);
-//     try {
-//       const loaded = await loadEntriesFromFirestore();
-//       setEntries(loaded);
-//       showToast(`Loaded ${loaded.length} memories ☁️`);
-//     } catch (err) {
-//       console.error(err);
-//       showToast("❌ Couldn't load from Firestore.");
-//     } finally {
-//       setLoading(false);
-//     }
-//   }, [setEntries, showToast]);
+  const syncFromFirestore = useCallback(async () => {
+    if (!isConfigured()) {
+      showToast("⚠️ Configure Firebase first!");
+      return;
+    }
+    setLoading(true);
+    try {
+      const loaded = await loadEntriesFromFirestore();
+      setEntries(loaded);
+      showToast(`Loaded ${loaded.length} memories ☁️`);
+    } catch (err) {
+      console.error(err);
+      showToast("❌ Couldn't load from Firestore.");
+    } finally {
+      setLoading(false);
+    }
+  }, [setEntries, showToast]);
 
-//   useEffect(() => {
-//     syncFromFirestore();
-//   }, []);
+  useEffect(() => {
+    syncFromFirestore();
+  }, []);
 
-//   const shown = entries.filter((e) => {
-//     if (filter === "all") return true;
-//     if (filter === "anon") return e.visibility === "anonymous";
-//     return true;
-//   });
+  const shown = entries.filter((e) => {
+    if (filter === "all") return true;
+    if (filter === "anon") return e.visibility === "anonymous";
+    return true;
+  });
 
-//   return (
-//     <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
-//       <main
-//         id="main-content"
-//         style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}
-//       >
-//         <div style={{ textAlign: "center", marginBottom: 36 }}>
-//           <h1
-//             style={{
-//               fontFamily: "'Caveat',cursive",
-//               fontSize: 56,
-//               color: NAVY,
-//             }}
-//           >
-//             memory wall 📸
-//           </h1>
-//           <div style={{ marginTop: 14 }}>
-//             <button
-//               className="btn-ghost"
-//               onClick={syncFromFirestore}
-//               disabled={loading}
-//               style={{ fontSize: 16, padding: "10px 22px" }}
-//             >
-//               {loading ? "Loading… ⏳" : "☁️ Refresh memories"}
-//             </button>
-//           </div>
-//           <div
-//             style={{
-//               display: "flex",
-//               justifyContent: "center",
-//               gap: 10,
-//               flexWrap: "wrap",
-//               marginTop: 20,
-//             }}
-//             role="group"
-//             aria-label="Filter memories"
-//           >
-//             {[
-//               ["all", "all"],
-//               ["anon", "anonymous"],
-//             ].map(([f, lbl]) => (
-//               <button
-//                 key={f}
-//                 className={`filter-pill${filter === f ? " active" : ""}`}
-//                 onClick={() => setFilter(f)}
-//                 aria-pressed={filter === f}
-//               >
-//                 {lbl}
-//               </button>
-//             ))}
-//           </div>
-//         </div>
+  return (
+    <div style={{ minHeight: "100vh", background: CREAM, paddingTop: 100 }}>
+      <main
+        id="main-content"
+        style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}
+      >
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <h1
+            style={{
+              fontFamily: "'Caveat',cursive",
+              fontSize: 56,
+              color: NAVY,
+            }}
+          >
+            memory wall 📸
+          </h1>
+          <div style={{ marginTop: 14 }}>
+            <button
+              className="btn-ghost"
+              onClick={syncFromFirestore}
+              disabled={loading}
+              style={{ fontSize: 16, padding: "10px 22px" }}
+            >
+              {loading ? "Loading… ⏳" : "☁️ Refresh memories"}
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              marginTop: 20,
+            }}
+            role="group"
+            aria-label="Filter memories"
+          >
+            {[
+              ["all", "all"],
+              ["anon", "anonymous"],
+            ].map(([f, lbl]) => (
+              <button
+                key={f}
+                className={`filter-pill${filter === f ? " active" : ""}`}
+                onClick={() => setFilter(f)}
+                aria-pressed={filter === f}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
 
-//         {loading ? (
-//           <p
-//             style={{
-//               textAlign: "center",
-//               fontFamily: "'Patrick Hand',cursive",
-//               color: NAVY + "88",
-//               marginTop: 60,
-//               fontSize: 20,
-//             }}
-//           >
-//             Loading memories… ✨
-//           </p>
-//         ) : shown.length === 0 ? (
-//           <p
-//             style={{
-//               textAlign: "center",
-//               fontFamily: "'Patrick Hand',cursive",
-//               color: NAVY + "88",
-//               marginTop: 60,
-//               fontSize: 20,
-//             }}
-//           >
-//             No memories here yet.
-//           </p>
-//         ) : (
-//           <div style={{ columns: "3 260px", columnGap: 22 }}>
-//             {shown.map((e) => (
-//               <MemoryCard key={e.id || e._docId} e={e} />
-//             ))}
-//           </div>
-//         )}
-//       </main>
-//     </div>
-//   );
-// }
+        {loading ? (
+          <p
+            style={{
+              textAlign: "center",
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              marginTop: 60,
+              fontSize: 20,
+            }}
+          >
+            Loading memories… ✨
+          </p>
+        ) : shown.length === 0 ? (
+          <p
+            style={{
+              textAlign: "center",
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              marginTop: 60,
+              fontSize: 20,
+            }}
+          >
+            No memories here yet.
+          </p>
+        ) : (
+          <div style={{ columns: "3 260px", columnGap: 22 }}>
+            {shown.map((e) => (
+              <MemoryCard key={e.id || e._docId} e={e} />
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
 
-// // ─── Timeline ─────────────────────────────────────────────────────────────────
+// ─── Timeline ─────────────────────────────────────────────────────────────────
 function TimelinePage({ entries }) {
   const sorted = [...entries].sort(
     (a, b) => new Date(a.date) - new Date(b.date),
