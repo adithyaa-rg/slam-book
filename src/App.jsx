@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import {
+  getStorage,
+  ref,
+  uploadBytes,
+  uploadBytesResumable,
+  getDownloadURL,
+} from "firebase/storage";
 import {
   getFirestore,
   collection,
@@ -52,7 +58,7 @@ const CONFIG = {
     apiKey: "AIzaSyDvvOAiDGI9w018lh_WH7gTfKZhyORU_bs",
     authDomain: "slam-3198e.firebaseapp.com",
     projectId: "slam-3198e",
-    storageBucket: "slam-3198e.firebasestorage.app",
+    storageBucket: "slam-3198e.firebasestorage.com",
     messagingSenderId: "81034722488",
     appId: "1:81034722488:web:1c5173ae0a988b4f1c484d",
     measurementId: "G-2VVW4WB8HX",
@@ -74,22 +80,56 @@ let _app = null;
 let _db = null;
 let _storage = null;
 
-function getStorageInstance() {
-  if (_storage) return _storage;
+// function getStorageInstance() {
+//   if (_storage) return _storage;
 
-  if (!_app) {
-    _app = initializeApp(CONFIG.firebase);
-  }
+//   if (!_app) {
+//     _app = initializeApp(CONFIG.firebase);
+//   }
 
-  _storage = getStorage(_app);
-  return _storage;
-}
+//   _storage = getStorage(_app);
+//   return _storage;
+// }
 // function getDB() {
 //   if (_db) return _db;
 //   if (!isConfigured()) throw new Error("Firebase not configured.");
 //   _app = initializeApp(CONFIG.firebase);
 //   _db = getFirestore(_app);
 //   return _db;
+// }
+// function uploadSingleFile(item, onProgress) {
+//   return new Promise((resolve, reject) => {
+//     const storage = getStorageInstance();
+
+//     const filename =
+//       Date.now() + "_" + Math.random().toString(36).slice(2) + "_" + item.name;
+
+//     const storageRef = ref(storage, `memories/${filename}`);
+
+//     const uploadTask = uploadBytesResumable(storageRef, item.file);
+
+//     uploadTask.on(
+//       "state_changed",
+
+//       (snapshot) => {
+//         const percent = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+
+//         onProgress(percent);
+//       },
+
+//       reject,
+
+//       async () => {
+//         const url = await getDownloadURL(uploadTask.snapshot.ref);
+
+//         resolve({
+//           name: item.name,
+//           type: item.type,
+//           url,
+//         });
+//       },
+//     );
+//   });
 // }
 function getDB() {
   if (_db) return _db;
@@ -162,7 +202,6 @@ async function sendEmailNotification(entry) {
     throw new Error(`EmailJS send failed: ${res.status} — ${text}`);
   }
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ██████████████████████   APP CODE   █████████████████████████████████████████
 // ─────────────────────────────────────────────────────────────────────────────
@@ -646,34 +685,35 @@ function FieldWrapper({ label, id, err, children }) {
     </div>
   );
 }
-async function uploadMedia(files) {
-  const storage = getStorageInstance();
+// async function uploadMedia(files) {
+//   const storage = getStorageInstance();
 
-  return Promise.all(
-    files.map(async (item) => {
-      const filename =
-        Date.now() +
-        "_" +
-        Math.random().toString(36).slice(2) +
-        "_" +
-        item.name;
+//   return Promise.all(
+//     files.map(async (item) => {
+//       const filename =
+//         Date.now() +
+//         "_" +
+//         Math.random().toString(36).slice(2) +
+//         "_" +
+//         item.name;
 
-      const storageRef = ref(storage, `memories/${filename}`);
+//       const storageRef = ref(storage, `memories/${filename}`);
 
-      await uploadBytes(storageRef, item.file);
+//       await uploadBytes(storageRef, item.file);
 
-      const downloadURL = await getDownloadURL(storageRef);
+//       const downloadURL = await getDownloadURL(storageRef);
 
-      return {
-        name: item.name,
-        type: item.type,
-        url: downloadURL,
-      };
-    }),
-  );
-}
+//       return {
+//         name: item.name,
+//         type: item.type,
+//         url: downloadURL,
+//       };
+//     }),
+//   );
+// }
 function WritePage({ entries, setEntries, setPage, showToast }) {
   const [name, setName] = useState("");
+  // const [uploadProgress, setUploadProgress] = useState(0);
   const [anonymous, setAnonymous] = useState(false);
   const [memory, setMemory] = useState("");
   const [message, setMessage] = useState("");
@@ -690,10 +730,9 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
     //   url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
     // }));
     const previews = Array.from(fileList).map((f) => ({
-      file: f,
       name: f.name,
       type: f.type.startsWith("image/") ? "image" : "other",
-      url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+      url: null,
     }));
     setMediaPreviews(previews);
   };
@@ -731,8 +770,14 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
     // };
 
     try {
-      const uploadedMedia =
-        mediaPreviews.length > 0 ? await uploadMedia(mediaPreviews) : [];
+      // const uploadedMedia =
+      //   mediaPreviews.length > 0
+      //     ? await Promise.all(
+      //         mediaPreviews.map((item) =>
+      //           uploadSingleFile(item, setUploadProgress),
+      //         ),
+      //       )
+      //     : [];
       const entry = {
         id: Date.now(),
         name: anonymous ? "Anonymous" : name || "Someone",
@@ -748,7 +793,11 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
         //   url: null,
         // })),
         //
-        mediaPreviews: uploadedMedia,
+        mediaPreviews: mediaPreviews.map((p) => ({
+          name: p.name,
+          type: p.type,
+          url: null,
+        })),
         emoji: rnd(EMOJIS),
         color: rnd(PALETTE),
         rot: Math.random() * 6 - 3,
@@ -780,7 +829,14 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
       setPage("home");
     } catch (err) {
       console.error("Firestore save failed:", err);
-      showToast("❌ Save failed — check your Firebase config.");
+
+      console.error("FULL ERROR:", err);
+      console.error("CODE:", err.code);
+      console.error("MESSAGE:", err.message);
+
+      showToast(`❌ ${err.message}`);
+
+      // showToast("❌ Save failed — check your Firebase config.");
     } finally {
       setSaving(false);
     }
@@ -921,6 +977,25 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
           />
         </div>
 
+        {/* {mediaPreviews.length > 0 && (
+          <div
+            style={{
+              marginBottom: 16,
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "88",
+              fontSize: 14,
+            }}
+          >
+            {mediaPreviews.map((p, i) => (
+              <div key={i}>📎 {p.name}</div>
+            ))}
+          </div>
+        )}
+
+
+        <button className="btn-cta" onClick={submit} disabled={saving}>
+          {saving ? "Saving… ⏳" : "💌 Save Memory"}
+        </button>*/}
         {mediaPreviews.length > 0 && (
           <div
             style={{
@@ -935,6 +1010,38 @@ function WritePage({ entries, setEntries, setPage, showToast }) {
             ))}
           </div>
         )}
+
+        {/* {saving && (
+          <>
+            <div
+              style={{
+                width: "100%",
+                background: "#eee",
+                borderRadius: 10,
+                marginBottom: 10,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${uploadProgress}%`,
+                  height: 10,
+                  background: "#C94C4C",
+                  transition: "width 0.2s",
+                }}
+              />
+            </div>
+
+            <p
+              style={{
+                fontFamily: "'Patrick Hand', cursive",
+                marginBottom: 20,
+              }}
+            >
+              Uploading... {Math.round(uploadProgress)}%
+            </p>
+          </>
+        )}*/}
 
         <button className="btn-cta" onClick={submit} disabled={saving}>
           {saving ? "Saving… ⏳" : "💌 Save Memory"}
@@ -1027,33 +1134,15 @@ function MemoryCard({ e }) {
           </p>
         )}*/}
         {e.mediaPreviews?.length > 0 && (
-          <div style={{ marginBottom: 8 }}>
-            {e.mediaPreviews.map((p, idx) =>
-              p.type === "image" ? (
-                <img
-                  key={idx}
-                  src={p.url}
-                  alt={p.name}
-                  style={{
-                    width: "100%",
-                    borderRadius: 8,
-                    marginBottom: 8,
-                  }}
-                />
-              ) : (
-                <div
-                  key={idx}
-                  style={{
-                    fontFamily: "'Patrick Hand',cursive",
-                    color: NAVY + "66",
-                    fontSize: 13,
-                    marginBottom: 4,
-                  }}
-                >
-                  📎 {p.name}
-                </div>
-              ),
-            )}
+          <div
+            style={{
+              fontFamily: "'Patrick Hand',cursive",
+              color: NAVY + "66",
+              fontSize: 13,
+              marginBottom: 8,
+            }}
+          >
+            📎 {e.mediaPreviews.map((p) => p.name).join(", ")}
           </div>
         )}
         <p
